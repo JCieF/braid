@@ -1,23 +1,22 @@
 import { Request, Response } from "playwright";
 import { VideoCandidate } from "../types/index.js";
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class RequestHandler {
-    private logger: Logger;
+    private logger: LogAgent;
     private videoCandidates: VideoCandidate[] = [];
     private allVideoRequests: string[] = [];
     private capturedHeaders: Record<string, string> = {};
 
-    constructor() {
-        this.logger = createLogger("RequestHandler");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("RequestHandler");
     }
 
     async handleRequest(request: Request): Promise<void> {
         const url = request.url();
         const urlLower = url.toLowerCase();
 
-        // Only process video-related URLs f    rom allowed domains
+        // Only process video-related URLs from allowed domains
         if (this.isVideoRelatedUrl(urlLower)) {
             this.capturedHeaders = {
                 "User-Agent": request.headers()["user-agent"] || "",
@@ -30,13 +29,14 @@ export class RequestHandler {
             };
 
             this.allVideoRequests.push(url);
-            this.logger.info(
-                `Video-related request: ${request.method()} ${url}`
+            this.logger.log(
+                `Video-related request: ${request.method()} ${url}`,
+                "info"
             );
 
             // Look for M3U8 streams (only from allowed domains)
             if (urlLower.includes(".m3u8")) {
-                this.logger.info(`M3U8 detected: ${url}`);
+                this.logger.log(`M3U8 detected: ${url}`, "info");
 
                 const candidate: VideoCandidate = {
                     url,
@@ -49,7 +49,7 @@ export class RequestHandler {
                 // Avoid duplicates
                 if (!this.videoCandidates.some((c) => c.url === url)) {
                     this.videoCandidates.push(candidate);
-                    this.logger.info(`Added M3U8 candidate: ${url}`);
+                    this.logger.log(`Added M3U8 candidate: ${url}`, "info");
                 }
             }
         }
@@ -62,7 +62,10 @@ export class RequestHandler {
         const urlLower = url.toLowerCase();
 
         if (this.isVideoRelatedUrl(urlLower)) {
-            this.logger.info(`Video response: ${response.status()} ${url}`);
+            this.logger.log(
+                `Video response: ${response.status()} ${url}`,
+                "info"
+            );
 
             // Special handling for M3U8 responses
             if (urlLower.includes(".m3u8")) {

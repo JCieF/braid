@@ -3,17 +3,18 @@ import { BaseHelper } from "./BaseHelper.js";
 
 export class PageHelper extends BaseHelper {
     async waitForJWPlayerInitialization(page: Page): Promise<void> {
-        this.logger.info("⏳ Waiting for JWPlayer initialization...");
+        this.logger.log("⏳ Waiting for JWPlayer initialization...", "info");
 
         // Wait for JWPlayer script to load
         try {
             await page.waitForSelector('script[src*="jwplayer"]', {
                 timeout: 10000,
             });
-            this.logger.debug("JWPlayer script detected");
+            this.logger.log("JWPlayer script detected", "debug");
         } catch {
-            this.logger.warn(
-                "JWPlayer script not found, continuing anyway..."
+            this.logger.log(
+                "JWPlayer script not found, continuing anyway...",
+                "warn"
             );
         }
 
@@ -31,12 +32,18 @@ export class PageHelper extends BaseHelper {
             });
 
             if (jwplayerReady) {
-                this.logger.debug("JWPlayer is initialized and ready");
+                this.logger.log("JWPlayer is initialized and ready", "debug");
             } else {
-                this.logger.debug("JWPlayer may not be fully initialized");
+                this.logger.log(
+                    "JWPlayer may not be fully initialized",
+                    "debug"
+                );
             }
         } catch (error) {
-            this.logger.debug(`Could not check JWPlayer status: ${error}`);
+            this.logger.log(
+                `Could not check JWPlayer status: ${error}`,
+                "debug"
+            );
         }
 
         // Wait for any initial video player setup
@@ -45,7 +52,7 @@ export class PageHelper extends BaseHelper {
 
     async extractVideoUrlsFromDOM(page: Page): Promise<any[]> {
         try {
-            this.logger.debug("Scanning DOM for video URLs...");
+            this.logger.log("Scanning DOM for video URLs...", "debug");
 
             // Check all frames (main page and iframes)
             const allFrames = [
@@ -64,8 +71,9 @@ export class PageHelper extends BaseHelper {
                     frameIndex === 0 ? "main" : `iframe-${frameIndex}`;
 
                 try {
-                    this.logger.info(
-                        `Checking ${frameName} frame for video elements...`
+                    this.logger.log(
+                        `Checking ${frameName} frame for video elements...`,
+                        "info"
                     );
 
                     const videoElements = await frame.evaluate(() => {
@@ -135,7 +143,10 @@ export class PageHelper extends BaseHelper {
                                     }
                                 }
                             } catch (e) {
-                                console.log("JWPlayer check failed:", e);
+                                this.logger.log(
+                                    `JWPlayer check failed: ${e}`,
+                                    "debug"
+                                );
                             }
                         }
 
@@ -157,15 +168,17 @@ export class PageHelper extends BaseHelper {
                     });
 
                     if (videoElements && videoElements.length > 0) {
-                        this.logger.info(
+                        this.logger.log(
                             `🎬 FOUND ${
                                 videoElements.length
-                            } VIDEO URLs IN ${frameName.toUpperCase()}:`
+                            } VIDEO URLs IN ${frameName.toUpperCase()}:`,
+                            "info"
                         );
 
                         for (const videoInfo of videoElements) {
-                            this.logger.info(
-                                `  ${videoInfo.type} (${videoInfo.element}): ${videoInfo.url}`
+                            this.logger.log(
+                                `  ${videoInfo.type} (${videoInfo.element}): ${videoInfo.url}`,
+                                "info"
                             );
                             allVideoElements.push({
                                 ...videoInfo,
@@ -175,19 +188,23 @@ export class PageHelper extends BaseHelper {
                         }
                     }
                 } catch (error) {
-                    this.logger.debug(
-                        `Error checking frame ${frameIndex}: ${error}`
+                    this.logger.log(
+                        `Error checking frame ${frameIndex}: ${error}`,
+                        "debug"
                     );
                 }
             }
 
             if (allVideoElements.length === 0) {
-                this.logger.debug("No video URLs found in DOM");
+                this.logger.log("No video URLs found in DOM", "debug");
             }
 
             return allVideoElements;
         } catch (error) {
-            this.logger.warn(`Error extracting video URLs from DOM: ${error}`);
+            this.logger.log(
+                `Error extracting video URLs from DOM: ${error}`,
+                "warn"
+            );
             return [];
         }
     }
@@ -200,10 +217,10 @@ export class PageHelper extends BaseHelper {
             const screenshotPath =
                 filename || `screenshot_${this.generateTimestamp()}.png`;
             await page.screenshot({ path: screenshotPath });
-            this.logger.info(`Screenshot saved: ${screenshotPath}`);
+            this.logger.log(`Screenshot saved: ${screenshotPath}`, "info");
             return screenshotPath;
         } catch (error) {
-            this.logger.warn(`Could not take screenshot: ${error}`);
+            this.logger.log(`Could not take screenshot: ${error}`, "warn");
             return null;
         }
     }
@@ -214,8 +231,9 @@ export class PageHelper extends BaseHelper {
             await element.scrollIntoViewIfNeeded();
             return true;
         } catch (error) {
-            this.logger.debug(
-                `Could not scroll to element ${selector}: ${error}`
+            this.logger.log(
+                `Could not scroll to element ${selector}: ${error}`,
+                "debug"
             );
             return false;
         }
@@ -262,7 +280,10 @@ export class PageHelper extends BaseHelper {
             await element.click({ timeout });
             return true;
         } catch (error) {
-            this.logger.debug(`Could not click element ${selector}: ${error}`);
+            this.logger.log(
+                `Could not click element ${selector}: ${error}`,
+                "debug"
+            );
             return false;
         }
     }

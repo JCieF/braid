@@ -23,8 +23,8 @@
 // }
 {
     "compilerOptions": {
-        "target": "ES6",
-        "module": "NodeNext",
+        "target": "ESNext",
+        "module": "CommonJS",
         // "moduleResolution": "nodenext",
         "declaration": true,
         // "allowJs": true,

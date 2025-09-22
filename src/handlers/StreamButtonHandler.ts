@@ -1,16 +1,15 @@
 import { Page } from "playwright";
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class StreamButtonHandler {
-    private logger: Logger;
+    private logger: LogAgent;
 
-    constructor() {
-        this.logger = createLogger("StreamButtonHandler");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("StreamButtonHandler");
     }
 
     async tryStreamButtonsSequentially(page: Page): Promise<boolean> {
-        this.logger.info("Trying stream buttons sequentially...");
+        this.logger.log("Trying stream buttons sequentially...", "info");
 
         // Define stream button selectors in order of preference
         const streamButtonSelectors = [
@@ -27,10 +26,11 @@ export class StreamButtonHandler {
             const selector = streamButtonSelectors[i];
 
             try {
-                this.logger.info(
+                this.logger.log(
                     `Trying stream button ${i + 1}/${
                         streamButtonSelectors.length
-                    }: ${selector}`
+                    }: ${selector}`,
+                    "info"
                 );
 
                 // Check if button exists
@@ -38,8 +38,9 @@ export class StreamButtonHandler {
                 const count = await elements.count();
 
                 if (count === 0) {
-                    this.logger.info(
-                        `No buttons found with selector: ${selector}`
+                    this.logger.log(
+                        `No buttons found with selector: ${selector}`,
+                        "info"
                     );
                     continue;
                 }
@@ -49,8 +50,9 @@ export class StreamButtonHandler {
                     try {
                         // Check if page is still active
                         if (page.isClosed()) {
-                            this.logger.warn(
-                                "Page is closed, stopping button attempts"
+                            this.logger.log(
+                                "Page is closed, stopping button attempts",
+                                "warn"
                             );
                             return false;
                         }
@@ -66,8 +68,9 @@ export class StreamButtonHandler {
                         const dataLocalize =
                             (await button.getAttribute("data-localize")) || "";
 
-                        this.logger.info(
-                            `Clicking button: ${buttonText} (${dataLocalize})`
+                        this.logger.log(
+                            `Clicking button: ${buttonText} (${dataLocalize})`,
+                            "info"
                         );
 
                         // Click the button with human-like behavior
@@ -88,8 +91,9 @@ export class StreamButtonHandler {
                             }
 
                             // Click with longer timeout
-                            this.logger.info(
-                                `Clicking button: ${buttonText} with human-like behavior`
+                            this.logger.log(
+                                `Clicking button: ${buttonText} with human-like behavior`,
+                                "info"
                             );
                             await button.click({ timeout: 10000 });
 
@@ -98,22 +102,27 @@ export class StreamButtonHandler {
 
                             return true; // Successfully clicked a button
                         } catch (clickError) {
-                            this.logger.warn(
-                                `Failed to click button ${buttonText}: ${clickError}`
+                            this.logger.log(
+                                `Failed to click button ${buttonText}: ${clickError}`,
+                                "warn"
                             );
                             continue;
                         }
                     } catch (error) {
-                        this.logger.warn(
+                        this.logger.log(
                             `Failed to click button ${
                                 j + 1
-                            } with selector ${selector}: ${error}`
+                            } with selector ${selector}: ${error}`,
+                            "warn"
                         );
                         continue;
                     }
                 }
             } catch (error) {
-                this.logger.warn(`Error with selector ${selector}: ${error}`);
+                this.logger.log(
+                    `Error with selector ${selector}: ${error}`,
+                    "warn"
+                );
                 continue;
             }
         }
@@ -126,15 +135,19 @@ export class StreamButtonHandler {
         selector: string
     ): Promise<boolean> {
         try {
-            this.logger.info(
-                `Attempting to click specific stream button: ${selector}`
+            this.logger.log(
+                `Attempting to click specific stream button: ${selector}`,
+                "info"
             );
 
             const elements = page.locator(selector);
             const count = await elements.count();
 
             if (count === 0) {
-                this.logger.info(`No button found with selector: ${selector}`);
+                this.logger.log(
+                    `No button found with selector: ${selector}`,
+                    "info"
+                );
                 return false;
             }
 
@@ -142,12 +155,12 @@ export class StreamButtonHandler {
             const isVisible = await button.isVisible();
 
             if (!isVisible) {
-                this.logger.info(`Button not visible: ${selector}`);
+                this.logger.log(`Button not visible: ${selector}`, "info");
                 return false;
             }
 
             const buttonText = (await button.textContent()) || "";
-            this.logger.info(`Clicking specific button: ${buttonText}`);
+            this.logger.log(`Clicking specific button: ${buttonText}`, "info");
 
             // Human-like clicking behavior
             await page.waitForTimeout(1000);
@@ -164,11 +177,15 @@ export class StreamButtonHandler {
             await button.click({ timeout: 5000 });
             await page.waitForTimeout(1000);
 
-            this.logger.info(`Successfully clicked button: ${buttonText}`);
+            this.logger.log(
+                `Successfully clicked button: ${buttonText}`,
+                "info"
+            );
             return true;
         } catch (error) {
-            this.logger.error(
-                `Failed to click specific stream button ${selector}: ${error}`
+            this.logger.log(
+                `Failed to click specific stream button ${selector}: ${error}`,
+                "error"
             );
             return false;
         }
@@ -198,20 +215,23 @@ export class StreamButtonHandler {
                         availableButtons.push(selector);
                         const buttonText =
                             (await elements.first().textContent()) || "";
-                        this.logger.info(
-                            `Found available stream button: ${buttonText} (${selector})`
+                        this.logger.log(
+                            `Found available stream button: ${buttonText} (${selector})`,
+                            "info"
                         );
                     }
                 }
             } catch (error) {
-                this.logger.debug(
-                    `Error checking selector ${selector}: ${error}`
+                this.logger.log(
+                    `Error checking selector ${selector}: ${error}`,
+                    "debug"
                 );
             }
         }
 
-        this.logger.info(
-            `Found ${availableButtons.length} available stream buttons`
+        this.logger.log(
+            `Found ${availableButtons.length} available stream buttons`,
+            "info"
         );
         return availableButtons;
     }

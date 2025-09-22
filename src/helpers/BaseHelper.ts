@@ -1,17 +1,16 @@
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "./StringBuilder.js";
 
 export abstract class BaseHelper {
-    protected logger: Logger;
+    protected logger: LogAgent;
     private statusCallback?: (status: string) => void;
 
-    constructor(statusCallback?: (status: string) => void) {
-        this.logger = createLogger(this.constructor.name);
+    constructor(logger: Logger, statusCallback?: (status: string) => void) {
+        this.logger = logger.agent(this.constructor.name);
         this.statusCallback = statusCallback;
     }
 
     protected updateStatus(status: string): void {
-        this.logger.info(status);
+        this.logger.log(status, "info");
         if (this.statusCallback) {
             this.statusCallback(status);
         }
@@ -43,7 +42,10 @@ export abstract class BaseHelper {
 
         // PRIORITY: Direct turbovidhls.com/t/ URLs are ALWAYS valid
         if (urlLower.includes("turbovidhls.com/t/")) {
-            this.logger.info(`Priority direct video URL detected: ${url}`);
+            this.logger.log(
+                `Priority direct video URL detected: ${url}`,
+                "info"
+            );
             return true;
         }
 

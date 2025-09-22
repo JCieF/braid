@@ -15,7 +15,7 @@ export class BrowserHelper extends BaseHelper {
 
         for (const path of bravePaths) {
             if (fs.existsSync(path)) {
-                this.logger.info(`Found Brave browser at: ${path}`);
+                this.logger.log(`Found Brave browser at: ${path}`, "info");
                 return true;
             }
         }
@@ -27,8 +27,9 @@ export class BrowserHelper extends BaseHelper {
                 encoding: "utf8",
             });
             if (result.trim()) {
-                this.logger.info(
-                    `Found Brave browser via which: ${result.trim()}`
+                this.logger.log(
+                    `Found Brave browser via which: ${result.trim()}`,
+                    "info"
                 );
                 return true;
             }
@@ -36,7 +37,7 @@ export class BrowserHelper extends BaseHelper {
             // Command failed
         }
 
-        this.logger.warn("Brave browser not found on system");
+        this.logger.log("Brave browser not found on system", "warn");
         return false;
     }
 
@@ -69,8 +70,9 @@ export class BrowserHelper extends BaseHelper {
         ) {
             return "brave";
         } else if (preferredType === "brave") {
-            this.logger.warn(
-                "Brave browser not found, falling back to Firefox"
+            this.logger.log(
+                "Brave browser not found, falling back to Firefox",
+                "warn"
             );
             return "firefox";
         }

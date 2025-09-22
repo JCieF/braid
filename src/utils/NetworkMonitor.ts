@@ -1,19 +1,21 @@
 import { Page } from "playwright";
-import { Logger } from "winston";
-import { createLogger } from "./Logger.js";
 import { VideoCandidate } from "../types/index.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class NetworkMonitor {
-    private logger: Logger;
+    private logger: LogAgent;
     private capturedHeaders: Record<string, string> = {};
     private videoCandidates: VideoCandidate[] = [];
 
-    constructor() {
-        this.logger = createLogger("NetworkMonitor");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("NetworkMonitor");
     }
 
     setupComprehensiveMonitoring(page: Page): void {
-        this.logger.info("Setting up comprehensive network monitoring...");
+        this.logger.log(
+            "Setting up comprehensive network monitoring...",
+            "info"
+        );
 
         // Track all requests and responses like a real browser
         page.on("request", (request) => {
@@ -21,8 +23,9 @@ export class NetworkMonitor {
 
             // Log important requests that indicate proper page loading
             if (this.isImportantRequest(url)) {
-                this.logger.info(
-                    `BROWSER-LIKE REQUEST: ${request.method()} ${request.url()}`
+                this.logger.log(
+                    `BROWSER-LIKE REQUEST: ${request.method()} ${request.url()}`,
+                    "info"
                 );
 
                 // Store headers for video-related requests
@@ -47,14 +50,16 @@ export class NetworkMonitor {
 
             // Log successful responses for important resources
             if (response.status() === 200 && this.isImportantRequest(url)) {
-                this.logger.info(
-                    `SUCCESSFUL RESPONSE: ${response.status()} ${response.url()}`
+                this.logger.log(
+                    `SUCCESSFUL RESPONSE: ${response.status()} ${response.url()}`,
+                    "info"
                 );
 
                 // Special handling for M3U8 responses
                 if (url.includes(".m3u8")) {
-                    this.logger.info(
-                        `M3U8 RESPONSE DETECTED: ${response.url()}`
+                    this.logger.log(
+                        `M3U8 RESPONSE DETECTED: ${response.url()}`,
+                        "info"
                     );
 
                     const candidate: VideoCandidate = {
@@ -78,7 +83,10 @@ export class NetworkMonitor {
             }
         });
 
-        this.logger.info("Comprehensive network monitoring setup complete");
+        this.logger.log(
+            "Comprehensive network monitoring setup complete",
+            "info"
+        );
     }
 
     private isImportantRequest(url: string): boolean {

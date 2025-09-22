@@ -1,15 +1,14 @@
 import { chromium, Browser, BrowserContext, Page } from "playwright";
 import { BrowserConfig } from "../types/index.js";
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class BraveBrowser {
     private browser: Browser | null = null;
     private context: BrowserContext | null = null;
-    private logger: Logger;
+    private logger: LogAgent;
 
-    constructor() {
-        this.logger = createLogger("BraveBrowser");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("BraveBrowser");
     }
 
     async launch(config: BrowserConfig = {}): Promise<void> {
@@ -53,11 +52,15 @@ export class BraveBrowser {
                 javaScriptEnabled: config.javaScriptEnabled ?? true,
             });
 
-            this.logger.info(
-                "Brave browser launched with enhanced ad-blocking"
+            this.logger.log(
+                "Brave browser launched with enhanced ad-blocking",
+                "info"
             );
         } catch (error) {
-            this.logger.error("Failed to launch Brave browser:", error);
+            this.logger.log(
+                `Failed to launch Brave browser: ${error}`,
+                "error"
+            );
             throw error;
         }
     }
@@ -77,18 +80,19 @@ export class BraveBrowser {
 
         if (url) {
             try {
-                this.logger.info(`Navigating to: ${url}`);
+                this.logger.log(`Navigating to: ${url}`, "info");
                 await page.goto(url, {
                     waitUntil: "domcontentloaded",
                     timeout: 30000,
                 });
-                this.logger.info("Page loaded successfully");
+                this.logger.log("Page loaded successfully", "info");
 
                 // Wait for dynamic content
                 await page.waitForTimeout(3000);
             } catch (error) {
-                this.logger.warn(
-                    `Page load timeout, but continuing anyway: ${error}`
+                this.logger.log(
+                    `Page load timeout, but continuing anyway: ${error}`,
+                    "warn"
                 );
             }
         }
@@ -113,14 +117,14 @@ export class BraveBrowser {
     private logRequest(request: any): void {
         const url = request.url();
         if (this.isVideoRelatedUrl(url)) {
-            this.logger.info(`REQUEST: ${request.method()} ${url}`);
+            this.logger.log(`REQUEST: ${request.method()} ${url}`, "info");
         }
     }
 
     private logResponse(response: any): void {
         const url = response.url();
         if (this.isVideoRelatedUrl(url)) {
-            this.logger.info(`RESPONSE: ${response.status()} ${url}`);
+            this.logger.log(`RESPONSE: ${response.status()} ${url}`, "info");
         }
     }
 
@@ -133,10 +137,10 @@ export class BraveBrowser {
         try {
             if (this.browser) {
                 await this.browser.close();
-                this.logger.info("Brave browser closed");
+                this.logger.log("Brave browser closed", "info");
             }
         } catch (error) {
-            this.logger.warn(`Error closing Brave browser: ${error}`);
+            this.logger.log(`Error closing Brave browser: ${error}`, "warn");
         }
     }
 }

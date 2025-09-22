@@ -1,16 +1,15 @@
 import { Page } from "playwright";
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class PopupHandler {
-    private logger: Logger;
+    private logger: LogAgent;
 
-    constructor() {
-        this.logger = createLogger("PopupHandler");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("PopupHandler");
     }
 
     async closePopups(page: Page): Promise<void> {
-        this.logger.info("Checking for popups and modals to close...");
+        this.logger.log("Checking for popups and modals to close...", "info");
 
         const popupSelectors = [
             // Common modal close buttons
@@ -88,46 +87,53 @@ export class PopupHandler {
                             const isVisible = await element.isVisible();
                             if (!isVisible) continue;
 
-                            this.logger.info(
-                                `Clicking popup close button: ${selector}`
+                            this.logger.log(
+                                `Clicking popup close button: ${selector}`,
+                                "info"
                             );
                             await element.click({ timeout: 3000 });
 
                             // Wait a moment for the popup to close
                             await page.waitForTimeout(500);
                         } catch (error) {
-                            this.logger.debug(
-                                `Failed to click popup element ${i} with selector ${selector}: ${error}`
+                            this.logger.log(
+                                `Failed to click popup element ${i} with selector ${selector}: ${error}`,
+                                "debug"
                             );
                         }
                     }
                 }
             } catch (error) {
-                this.logger.debug(
-                    `Error with popup selector ${selector}: ${error}`
+                this.logger.log(
+                    `Error with popup selector ${selector}: ${error}`,
+                    "debug"
                 );
             }
         }
 
         // Also handle page dialogs (alert, confirm, prompt)
         page.on("dialog", async (dialog) => {
-            this.logger.info(
-                `Handling dialog: ${dialog.type()} - ${dialog.message()}`
+            this.logger.log(
+                `Handling dialog: ${dialog.type()} - ${dialog.message()}`,
+                "info"
             );
             await dialog.dismiss();
         });
 
         // Close any new popup windows/tabs
         page.context().on("page", async (newPage) => {
-            this.logger.info("New popup page detected, closing it");
+            this.logger.log("New popup page detected, closing it", "info");
             try {
                 await newPage.close();
             } catch (error) {
-                this.logger.debug(`Failed to close popup page: ${error}`);
+                this.logger.log(
+                    `Failed to close popup page: ${error}`,
+                    "debug"
+                );
             }
         });
 
-        this.logger.info("Popup cleanup completed");
+        this.logger.log("Popup cleanup completed", "info");
     }
 
     async closeSpecificPopup(page: Page, selector: string): Promise<boolean> {
@@ -136,7 +142,7 @@ export class PopupHandler {
             const isVisible = await element.isVisible();
 
             if (isVisible) {
-                this.logger.info(`Closing specific popup: ${selector}`);
+                this.logger.log(`Closing specific popup: ${selector}`, "info");
                 await element.click({ timeout: 3000 });
                 await page.waitForTimeout(500);
                 return true;
@@ -144,8 +150,9 @@ export class PopupHandler {
 
             return false;
         } catch (error) {
-            this.logger.debug(
-                `Failed to close specific popup ${selector}: ${error}`
+            this.logger.log(
+                `Failed to close specific popup ${selector}: ${error}`,
+                "debug"
             );
             return false;
         }
@@ -155,8 +162,9 @@ export class PopupHandler {
         page: Page,
         timeout: number = 5000
     ): Promise<void> {
-        this.logger.info(
-            `Waiting ${timeout}ms for popups to appear and closing them...`
+        this.logger.log(
+            `Waiting ${timeout}ms for popups to appear and closing them...`,
+            "info"
         );
 
         const startTime = Date.now();
@@ -166,6 +174,6 @@ export class PopupHandler {
             await page.waitForTimeout(1000);
         }
 
-        this.logger.info("Popup monitoring period completed");
+        this.logger.log("Popup monitoring period completed", "info");
     }
 }

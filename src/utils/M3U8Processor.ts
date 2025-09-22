@@ -2,10 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { spawn, execSync } from "child_process";
-import { Logger } from "winston";
-import { createLogger } from "./Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 import { M3U8ProcessorConfig } from "../types/index.js";
 import * as cliProgress from "cli-progress";
+import { DEFAULT_OUTPUT_DIR } from "../helpers/Constants.js";
 // FFmpeg path resolution
 let ffmpegStatic: string | null = null;
 
@@ -13,18 +13,34 @@ async function loadFFmpegStatic(): Promise<string | null> {
     if (ffmpegStatic !== null) {
         return ffmpegStatic;
     }
-    
+
     try {
         // Use dynamic import for ES modules
         const ffmpegModule = await import("ffmpeg-static");
-        ffmpegStatic = (ffmpegModule.default || ffmpegModule) as unknown as string;
+        ffmpegStatic = (ffmpegModule.default ||
+            ffmpegModule) as unknown as string;
         return ffmpegStatic;
     } catch (error) {
         // Try require as fallback for CommonJS compatibility
         try {
-            const { createRequire } = await import('module');
-            const require = createRequire(import.meta.url);
-            ffmpegStatic = require("ffmpeg-static");
+            // Use __filename for CommonJS compatibility instead of import.meta.url
+            const { createRequire } = await import("module");
+            let requireFn: NodeJS.Require;
+
+            // Check if we're in an ES module environment
+            if (typeof __filename !== "undefined") {
+                // CommonJS environment
+                requireFn = require;
+            } else {
+                // ES module environment - create require from current file URL
+                // Use a more compatible approach to get the current module URL
+                const moduleUrl = new URL(
+                    "file://" + process.cwd() + "/package.json"
+                );
+                requireFn = createRequire(moduleUrl);
+            }
+
+            ffmpegStatic = requireFn("ffmpeg-static");
             return ffmpegStatic;
         } catch (requireError) {
             console.warn(
@@ -192,20 +208,20 @@ class SimpleDownloader {
 
             return null;
         } catch (error) {
-            this.logger?.error(`Text download failed: ${error}`);
+            this.logger?.log(`Text download failed: ${error}`, "error");
             return null;
         }
     }
 
-    private logger?: Logger;
+    private logger?: LogAgent;
 
     setLogger(logger: Logger) {
-        this.logger = logger;
+        this.logger = logger.agent("SimpleDownloader");
     }
 }
 
 export class M3U8Processor {
-    private logger: Logger;
+    private logger: LogAgent;
     private downloader: SimpleDownloader;
     private tempDir: string | null = null;
     private segmentFiles: string[] = [];
@@ -216,17 +232,17 @@ export class M3U8Processor {
     private totalSegments: number = 0;
     private downloadStartTime: number = 0;
 
-    constructor(config: M3U8ProcessorConfig = {}) {
-        this.logger = createLogger("M3U8Processor");
+    constructor(logger: Logger, config: M3U8ProcessorConfig = {}) {
+        this.logger = logger.agent("M3U8Processor");
         this.config = {
-            outputDir: config.outputDir || "downloads",
+            outputFilepath: config.outputFilepath || DEFAULT_OUTPUT_DIR,
             maxWorkers: config.maxWorkers || 4,
             timeout: config.timeout || 30000, // Python default timeout
             retries: config.retries || 3,
             ffmpegPath: config.ffmpegPath, // Will be set in initializeFFmpeg
             segmentTimeout: config.segmentTimeout || 30000,
         };
-        
+
         // Initialize FFmpeg path asynchronously
         this.initializeFFmpeg();
 
@@ -251,18 +267,29 @@ export class M3U8Processor {
         });
 
         // Set logger for downloader
-        this.downloader.setLogger(this.logger);
+        this.downloader.setLogger(this.logger.logger);
     }
-    
+
+    get outputFilename() {
+        return path.basename(this.config.outputFilepath || DEFAULT_OUTPUT_DIR);
+    }
+
+    get outputDirpath() {
+        return path.dirname(this.config.outputFilepath || DEFAULT_OUTPUT_DIR);
+    }
+
     private async initializeFFmpeg(): Promise<void> {
         if (!this.config.ffmpegPath) {
             const bundledFFmpeg = await loadFFmpegStatic();
             this.config.ffmpegPath = bundledFFmpeg || "ffmpeg";
-            
+
             if (bundledFFmpeg) {
-                this.logger.info("Using bundled FFmpeg from ffmpeg-static");
+                this.logger.log(
+                    "Using bundled FFmpeg from ffmpeg-static",
+                    "info"
+                );
             } else {
-                this.logger.warn("Using system FFmpeg as fallback");
+                this.logger.log("Using system FFmpeg as fallback", "warn");
             }
         }
     }
@@ -356,18 +383,19 @@ export class M3U8Processor {
         browserPage?: any
     ): Promise<Playlist | null> {
         try {
-            this.logger.info(`Downloading M3U8 playlist: ${m3u8Url}`);
+            this.logger.log(`Downloading M3U8 playlist: ${m3u8Url}`, "info");
 
             // Download M3U8 content using curl (much more reliable)
             const playlistContent = await this.downloader.downloadText(m3u8Url);
 
             if (!playlistContent) {
-                this.logger.error("Failed to download M3U8 playlist");
+                this.logger.log("Failed to download M3U8 playlist", "error");
                 return null;
             }
 
-            this.logger.info(
-                `M3U8 content downloaded: ${playlistContent.length} characters`
+            this.logger.log(
+                `M3U8 content downloaded: ${playlistContent.length} characters`,
+                "info"
             );
 
             // Log first few lines of playlist for debugging
@@ -375,12 +403,13 @@ export class M3U8Processor {
                 .split("\n")
                 .slice(0, 5)
                 .join("\n");
-            this.logger.debug(`Playlist preview:\n${firstLines}`);
+            this.logger.log(`Playlist preview:\n${firstLines}`, "debug");
 
             return this.parseM3U8Content(playlistContent, m3u8Url);
         } catch (error: any) {
-            this.logger.error(
-                `Error parsing playlist: ${error.message || error}`
+            this.logger.log(
+                `Error parsing playlist: ${error.message || error}`,
+                "error"
             );
             return null;
         }
@@ -420,8 +449,9 @@ export class M3U8Processor {
 
         if (isMasterPlaylist) {
             // Parse master playlist exactly like Python m3u8 library
-            this.logger.info(
-                "Parsing master playlist (multiple quality streams)"
+            this.logger.log(
+                "Parsing master playlist (multiple quality streams)",
+                "info"
             );
             let i = 0;
             while (i < lines.length) {
@@ -443,12 +473,13 @@ export class M3U8Processor {
                 }
             }
 
-            this.logger.info(
-                `Found ${playlist.playlists?.length || 0} quality variants`
+            this.logger.log(
+                `Found ${playlist.playlists?.length || 0} quality variants`,
+                "info"
             );
         } else {
             // Parse media playlist exactly like Python m3u8 library
-            this.logger.info("Parsing media playlist (video segments)");
+            this.logger.log("Parsing media playlist (video segments)", "info");
             let i = 0;
             while (i < lines.length) {
                 const line = lines[i];
@@ -468,8 +499,9 @@ export class M3U8Processor {
                 }
             }
 
-            this.logger.info(
-                `Found ${playlist.segments.length} video segments`
+            this.logger.log(
+                `Found ${playlist.segments.length} video segments`,
+                "info"
             );
         }
 
@@ -523,7 +555,10 @@ export class M3U8Processor {
             !masterPlaylist.playlists ||
             masterPlaylist.playlists.length === 0
         ) {
-            this.logger.error("No quality variants found in master playlist");
+            this.logger.log(
+                "No quality variants found in master playlist",
+                "error"
+            );
             return null;
         }
 
@@ -558,14 +593,17 @@ export class M3U8Processor {
             return heightB - heightA; // Descending order (best first)
         });
 
-        this.logger.info("Available qualities:");
+        this.logger.log("Available qualities:", "info");
         qualities.forEach((q, i) => {
-            this.logger.info(`${i + 1}. ${q.resolution} (${q.bandwidth} bps)`);
+            this.logger.log(
+                `${i + 1}. ${q.resolution} (${q.bandwidth} bps)`,
+                "info"
+            );
         });
 
         // Auto-select best quality (like Python quality_preference='best')
         const selected = qualities[0];
-        this.logger.info(`Selected quality: ${selected.resolution}`);
+        this.logger.log(`Selected quality: ${selected.resolution}`, "info");
 
         return this.resolveUrl(selected.url, baseUrl);
     }
@@ -591,29 +629,100 @@ export class M3U8Processor {
         percentage: string
     ): void {
         // Create a visual progress bar
-        const barWidth = 40;
-        const filledWidth = Math.round((completed / total) * barWidth);
-        const emptyWidth = barWidth - filledWidth;
-        const bar = "█".repeat(filledWidth) + "░".repeat(emptyWidth);
+        // const barWidth = 40;
+        // const filledWidth = Math.round((completed / total) * barWidth);
+        // const emptyWidth = barWidth - filledWidth;
+        // const bar = "█".repeat(filledWidth) + "░".repeat(emptyWidth);
 
         // Calculate ETA
         const speedNum = parseFloat(speed);
         const remainingSegments = total - completed;
         const etaSeconds =
             speedNum > 0 ? Math.round(remainingSegments / speedNum) : 0;
-        const eta = etaSeconds > 0 ? `${etaSeconds}s` : "N/A";
+        // const eta = etaSeconds > 0 ? `${etaSeconds}s` : "N/A";
 
         // Create the progress line with padding to clear previous content
-        const progressLine = `Downloading |${bar}| ${percentage}% || ${completed}/${total} segments || ETA: ${eta} || Speed: ${speed} seg/s`;
-        const paddedLine = progressLine.padEnd(120, " "); // Pad to 120 chars to clear any leftover text
+        // const progressLine = `Downloading |${bar}| ${percentage}% || ${completed}/${total} segments || ETA: ${eta} || Speed: ${speed} seg/s`;
+        // const paddedLine = progressLine.padEnd(120, " "); // Pad to 120 chars to clear any leftover text
 
-        // Clear line and write new content
-        process.stdout.write(`\r${paddedLine}\r${progressLine}`);
+        // // Clear line and write new content
+        // process.stdout.write(`\r${paddedLine}\r${progressLine}`);
 
-        // Add newline only when complete
-        if (completed === total) {
-            process.stdout.write("\n");
-        }
+        // // Add newline only when complete
+        // if (completed === total) {
+        //     process.stdout.write("\n");
+        // }
+
+        // Calculate actual progress data
+        const elapsed = (Date.now() - this.downloadStartTime) / 1000;
+
+        // Estimate bytes (assuming ~500KB average per segment)
+        const avgSegmentSize = 500 * 1024; // 500KB
+        const estimatedTotalBytes = total * avgSegmentSize;
+        const estimatedDownloadedBytes = completed * avgSegmentSize;
+
+        // Format helpers
+        const formatBytes = (bytes: number): string => {
+            const mb = bytes / (1024 * 1024);
+            return mb >= 1
+                ? `${mb.toFixed(2)}MiB`
+                : `${(bytes / 1024).toFixed(2)}KiB`;
+        };
+
+        const formatTime = (seconds: number): string => {
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${hours.toString().padStart(2, "0")}:${mins
+                .toString()
+                .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+        };
+
+        const speedBytesPerSec = speedNum * avgSegmentSize;
+        const progressData = {
+            status: completed === total ? "finished" : "downloading",
+            downloaded_bytes: estimatedDownloadedBytes,
+            total_bytes: estimatedTotalBytes,
+            tmpfilename: `segment_${completed
+                .toString()
+                .padStart(5, "0")}.ts.part`,
+            filename: `video_segments_${total}_total.mp4`,
+            eta: etaSeconds,
+            speed: speedBytesPerSec,
+            elapsed: elapsed,
+            ctx_id: null,
+            _eta_str: etaSeconds > 0 ? formatTime(etaSeconds) : "N/A",
+            _speed_str:
+                speedBytesPerSec > 0
+                    ? `${(speedBytesPerSec / (1024 * 1024)).toFixed(2)}MiB/s`
+                    : "N/A",
+            _percent_str: percentage + "%",
+            _total_bytes_str: formatBytes(estimatedTotalBytes),
+            _total_bytes_estimate_str: formatBytes(estimatedTotalBytes),
+            _downloaded_bytes_str: formatBytes(estimatedDownloadedBytes),
+            _elapsed_str: formatTime(elapsed),
+            _default_template: `${percentage}% of ${formatBytes(
+                estimatedTotalBytes
+            )} at ${
+                speedBytesPerSec > 0
+                    ? (speedBytesPerSec / (1024 * 1024)).toFixed(2) + "MiB/s"
+                    : "N/A"
+            } ETA ${etaSeconds > 0 ? formatTime(etaSeconds) : "N/A"}`,
+        };
+
+        const payload = JSON.stringify(progressData);
+
+        this.logger.logger.append(payload);
+        this.logger.logger.invokeEvent.sender.send(
+            this.logger.logger.downloadId,
+            {
+                data: {
+                    log: payload,
+                    value: progressData,
+                },
+                completeLog: this.logger.logger.toString(),
+            }
+        );
     }
 
     /**
@@ -646,7 +755,7 @@ export class M3U8Processor {
                 percentage
             );
         } catch (error) {
-            this.logger.debug(`Progress update error: ${error}`);
+            this.logger.log(`Progress update error: ${error}`, "debug");
         } finally {
             this.progressUpdateLock = false;
         }
@@ -678,7 +787,7 @@ export class M3U8Processor {
             }
         } catch (error) {
             // Ignore progress bar update errors to prevent crashes
-            this.logger.debug(`Progress bar update error: ${error}`);
+            this.logger.log(`Progress bar update error: ${error}`, "debug");
         } finally {
             this.progressUpdateLock = false;
         }
@@ -703,20 +812,26 @@ export class M3U8Processor {
         progressCallback?: (current: number, total: number) => void
     ): Promise<boolean> {
         if (!playlist.segments || playlist.segments.length === 0) {
-            this.logger.error("No segments found in playlist");
+            this.logger.log("No segments found in playlist", "error");
             return false;
         }
 
-        // Create temporary directory exactly like Python
-        this.tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "m3u8_download_"));
+        // Create temporary directory exactly like Python with unique identifier
+        const uniqueId = `${Date.now()}_${Math.random()
+            .toString(36)
+            .substring(2, 9)}`;
+        this.tempDir = fs.mkdtempSync(
+            path.join(os.tmpdir(), `m3u8_download_${uniqueId}_`)
+        );
 
         // Initialize progress tracking
         this.totalSegments = playlist.segments.length;
         this.completedSegments = 0;
         this.downloadStartTime = Date.now();
 
-        this.logger.info(
-            `Starting download of ${this.totalSegments} segments...`
+        this.logger.log(
+            `Starting download of ${this.totalSegments} segments...`,
+            "info"
         );
 
         // Initialize progress bar
@@ -823,31 +938,37 @@ export class M3U8Processor {
 
         // Clear the progress line and show completion message
         process.stdout.write("\r" + " ".repeat(100) + "\r"); // Clear the line
-        this.logger.info(
+        this.logger.log(
             `Download completed: ${successCount}/${
                 this.totalSegments
             } segments successful in ${totalTime.toFixed(
                 1
-            )}s (avg: ${avgSpeed} seg/s)`
+            )}s (avg: ${avgSpeed} seg/s)`,
+            "info"
         );
 
         if (successCount === 0) {
-            this.logger.error("No segments were downloaded successfully");
+            this.logger.log(
+                "No segments were downloaded successfully",
+                "error"
+            );
             return false;
         }
 
         // Accept partial success like Python (at least 80% of segments)
         const successRate = successCount / this.totalSegments;
         if (successRate < 0.8) {
-            this.logger.warn(
+            this.logger.log(
                 `Partial success: ${(successRate * 100).toFixed(
                     1
-                )}% - will try curl fallback`
+                )}% - will try curl fallback`,
+                "warn"
             );
             return false; // Force fallback to curl method
         } else {
-            this.logger.info(
-                `Successfully downloaded ${successCount} segments via direct HTTP`
+            this.logger.log(
+                `Successfully downloaded ${successCount} segments via direct HTTP`,
+                "info"
             );
             return true;
         }
@@ -858,19 +979,21 @@ export class M3U8Processor {
     /**
      * Convert downloaded segments to MP4 - equivalent of Python _convert_to_mp4
      */
-    private async convertToMp4(outputFilename: string): Promise<boolean> {
+    private async convertToMp4(): Promise<boolean> {
         if (this.segmentFiles.length === 0) {
-            this.logger.error("No segments to convert");
+            this.logger.log("No segments to convert", "error");
             return false;
         }
 
-        this.logger.info(
-            `Converting ${this.segmentFiles.length} segments to MP4: ${outputFilename}`
+        this.logger.log(
+            `Converting ${this.segmentFiles.length} segments to MP4: ${this.outputFilename}`,
+            "info"
         );
 
         try {
             // Ensure output directory exists
-            const outputDir = path.dirname(outputFilename);
+            const outputDir = this.outputDirpath;
+
             if (!fs.existsSync(outputDir)) {
                 fs.mkdirSync(outputDir, { recursive: true });
             }
@@ -898,21 +1021,21 @@ export class M3U8Processor {
                 "-f",
                 "mp4",
                 "-y", // Overwrite output
-                outputFilename,
+                this.config.outputFilepath || DEFAULT_OUTPUT_DIR,
             ];
 
             const success = await this.runFFmpeg(ffmpegArgs);
 
             if (success) {
-                this.logger.info("Conversion completed successfully");
+                this.logger.log("Conversion completed successfully", "info");
                 return true;
             } else {
                 // Try alternative conversion method
-                return await this.convertAlternative(outputFilename);
+                return await this.convertAlternative(this.outputFilename);
             }
         } catch (error) {
-            this.logger.error(`Error during conversion: ${error}`);
-            return await this.convertAlternative(outputFilename);
+            this.logger.log(`Error during conversion: ${error}`, "error");
+            return await this.convertAlternative(this.outputFilename);
         }
     }
 
@@ -921,7 +1044,7 @@ export class M3U8Processor {
      */
     private async convertAlternative(outputFilename: string): Promise<boolean> {
         try {
-            this.logger.info("Trying alternative conversion method...");
+            this.logger.log("Trying alternative conversion method...", "info");
 
             const concatFile = path.join(this.tempDir!, "concat.txt");
             const sortedSegments = this.segmentFiles.sort();
@@ -950,16 +1073,20 @@ export class M3U8Processor {
             const success = await this.runFFmpeg(ffmpegArgs);
 
             if (success) {
-                this.logger.info(
-                    "Alternative conversion completed successfully"
+                this.logger.log(
+                    "Alternative conversion completed successfully",
+                    "info"
                 );
                 return true;
             } else {
-                this.logger.error("Alternative conversion also failed");
+                this.logger.log("Alternative conversion also failed", "error");
                 return false;
             }
         } catch (error) {
-            this.logger.error(`Alternative conversion also failed: ${error}`);
+            this.logger.log(
+                `Alternative conversion also failed: ${error}`,
+                "error"
+            );
             return false;
         }
     }
@@ -976,7 +1103,7 @@ export class M3U8Processor {
             ffmpeg.stderr?.on("data", (data) => {
                 const output = data.toString();
                 if (output.includes("error") || output.includes("Error")) {
-                    this.logger.error(`FFmpeg error: ${output}`);
+                    this.logger.log(`FFmpeg error: ${output}`, "error");
                     hasError = true;
                 }
             });
@@ -985,13 +1112,16 @@ export class M3U8Processor {
                 if (code === 0 && !hasError) {
                     resolve(true);
                 } else {
-                    this.logger.error(`FFmpeg failed with code: ${code}`);
+                    this.logger.log(
+                        `FFmpeg failed with code: ${code}`,
+                        "error"
+                    );
                     resolve(false);
                 }
             });
 
             ffmpeg.on("error", (error) => {
-                this.logger.error(`FFmpeg process error: ${error}`);
+                this.logger.log(`FFmpeg process error: ${error}`, "error");
                 resolve(false);
             });
         });
@@ -1008,7 +1138,10 @@ export class M3U8Processor {
             try {
                 fs.rmSync(this.tempDir, { recursive: true, force: true });
             } catch (error) {
-                this.logger.warn(`Failed to cleanup temp directory: ${error}`);
+                this.logger.log(
+                    `Failed to cleanup temp directory: ${error}`,
+                    "warn"
+                );
             }
         }
         this.segmentFiles = [];
@@ -1035,32 +1168,33 @@ export class M3U8Processor {
     async processM3U8(
         m3u8Url: string,
         headers: Record<string, string>,
-        outputFilename?: string,
         browserPage?: any
     ): Promise<boolean> {
         try {
             // Ensure FFmpeg is initialized before processing
             await this.initializeFFmpeg();
-            if (!outputFilename) {
-                const timestamp = Math.floor(Date.now() / 1000);
-                outputFilename = `pokemon_video_${timestamp}.mp4`;
-            }
 
-            const outputDir = this.config.outputDir || "downloads";
+            const outputDir = path.dirname(
+                this.config.outputFilepath || DEFAULT_OUTPUT_DIR
+            );
+            const outputFilename = path.basename(
+                this.config.outputFilepath || DEFAULT_OUTPUT_DIR
+            );
+
             if (!fs.existsSync(outputDir)) {
                 fs.mkdirSync(outputDir, { recursive: true });
             }
 
             const fullPath = path.join(outputDir, outputFilename);
 
-            this.logger.info(`Processing M3U8: ${m3u8Url}`);
-            this.logger.info(`Output: ${fullPath}`);
+            this.logger.log(`Processing M3U8: ${m3u8Url}`, "info");
+            this.logger.log(`Output: ${fullPath}`, "info");
 
             // Configure downloader with headers (including M3U8 URL for Referer/Origin) - exactly like Python
             this.configureDownloaderHeaders(headers, m3u8Url);
 
             // Step 1: Parse M3U8 playlist - try browser first if available, then direct HTTP
-            this.logger.info(`Fetching M3U8 playlist from: ${m3u8Url}`);
+            this.logger.log(`Fetching M3U8 playlist from: ${m3u8Url}`, "info");
             let playlist = null;
 
             if (browserPage) {
@@ -1070,12 +1204,14 @@ export class M3U8Processor {
                     browserPage
                 );
                 if (playlist) {
-                    this.logger.info(
-                        "Successfully parsed M3U8 playlist via browser"
+                    this.logger.log(
+                        "Successfully parsed M3U8 playlist via browser",
+                        "info"
                     );
                 } else {
-                    this.logger.debug(
-                        "Browser M3U8 fetch failed, trying direct HTTP..."
+                    this.logger.log(
+                        "Browser M3U8 fetch failed, trying direct HTTP...",
+                        "debug"
                     );
                 }
             }
@@ -1084,8 +1220,9 @@ export class M3U8Processor {
                 // Fallback to direct HTTP (like Python)
                 playlist = await this.parsePlaylist(m3u8Url);
                 if (!playlist) {
-                    this.logger.error(
-                        "Failed to parse M3U8 playlist with both browser and direct HTTP"
+                    this.logger.log(
+                        "Failed to parse M3U8 playlist with both browser and direct HTTP",
+                        "error"
                     );
                     return false;
                 }
@@ -1094,8 +1231,9 @@ export class M3U8Processor {
             // Step 2: Handle master playlist if needed
             let finalPlaylist = playlist;
             if (playlist.playlists && playlist.playlists.length > 0) {
-                this.logger.debug(
-                    "This appears to be a master playlist with multiple qualities"
+                this.logger.log(
+                    "This appears to be a master playlist with multiple qualities",
+                    "debug"
                 );
                 const selectedUrl = this.selectBestQuality(playlist, m3u8Url);
 
@@ -1103,7 +1241,10 @@ export class M3U8Processor {
                     return false;
                 }
 
-                this.logger.debug(`Selected quality URL: ${selectedUrl}`);
+                this.logger.log(
+                    `Selected quality URL: ${selectedUrl}`,
+                    "debug"
+                );
                 const selectedPlaylist = await this.parsePlaylist(selectedUrl);
                 if (!selectedPlaylist) {
                     return false;
@@ -1117,21 +1258,22 @@ export class M3U8Processor {
                 this.config.maxWorkers || 4
             );
             if (!segmentSuccess) {
-                this.logger.error(
-                    "Failed to download segments"
-                );
+                this.logger.log("Failed to download segments", "error");
                 return false;
             }
 
             // Step 4: Convert to MP4
-            if (!(await this.convertToMp4(fullPath))) {
+            if (!(await this.convertToMp4())) {
                 return false;
             }
 
-            this.logger.info(`Download completed successfully: ${fullPath}`);
+            this.logger.log(
+                `Download completed successfully: ${fullPath}`,
+                "info"
+            );
             return true;
         } catch (error) {
-            this.logger.error(`M3U8 processing failed: ${error}`);
+            this.logger.log(`M3U8 processing failed: ${error}`, "error");
             return false;
         } finally {
             this.cleanup();
@@ -1143,11 +1285,14 @@ export class M3U8Processor {
         headers: Record<string, string>
     ): Promise<boolean> {
         try {
-            this.logger.info(`Downloading direct video: ${videoUrl}`);
+            this.logger.log(`Downloading direct video: ${videoUrl}`, "info");
 
-            const timestamp = Math.floor(Date.now() / 1000);
-            const outputFilename = `pokemon_video_${timestamp}.mp4`;
-            const outputDir = this.config.outputDir || "downloads";
+            const outputFilename = path.basename(
+                this.config.outputFilepath || DEFAULT_OUTPUT_DIR
+            );
+            const outputDir = path.dirname(
+                this.config.outputFilepath || DEFAULT_OUTPUT_DIR
+            );
             const outputPath = path.join(outputDir, outputFilename);
 
             // Ensure downloads directory exists
@@ -1180,20 +1325,23 @@ export class M3U8Processor {
             const success = await this.runFFmpeg(ffmpegArgs);
 
             if (success) {
-                this.logger.info(
-                    `Direct video download successful: ${outputPath}`
+                this.logger.log(
+                    `Direct video download successful: ${outputPath}`,
+                    "info"
                 );
                 return true;
             } else {
-                this.logger.error("Direct video download failed");
+                this.logger.log("Direct video download failed", "error");
                 return false;
             }
         } catch (error) {
-            this.logger.error(`Error downloading direct video: ${error}`);
+            this.logger.log(
+                `Error downloading direct video: ${error}`,
+                "error"
+            );
             return false;
         }
     }
-
 
     // Browser-based methods that use the browser's session context
 
@@ -1202,43 +1350,52 @@ export class M3U8Processor {
         browserPage: any
     ): Promise<Playlist | null> {
         try {
-            this.logger.debug(`Extracting M3U8 from browser: ${url}`);
-            
-            const response = await browserPage.evaluate(
-                (m3u8Url: string) => {
-                    return fetch(m3u8Url, {
-                        method: "GET",
-                        credentials: "include",
-                        headers: {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                            Accept: "*/*",
-                            "Accept-Language": "en-US,en;q=0.9",
-                            "Cache-Control": "no-cache",
-                        },
-                    })
-                    .then(response => {
+            this.logger.log(`Extracting M3U8 from browser: ${url}`, "debug");
+
+            const response = await browserPage.evaluate((m3u8Url: string) => {
+                return fetch(m3u8Url, {
+                    method: "GET",
+                    credentials: "include",
+                    headers: {
+                        "User-Agent":
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        Accept: "*/*",
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "Cache-Control": "no-cache",
+                    },
+                })
+                    .then((response) => {
                         if (!response.ok) {
-                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                            throw new Error(
+                                `HTTP ${response.status}: ${response.statusText}`
+                            );
                         }
                         return response.text();
                     })
-                    .then(text => ({ success: true, content: text }))
-                    .catch(error => ({
+                    .then((text) => ({ success: true, content: text }))
+                    .catch((error) => ({
                         success: false,
-                        error: error instanceof Error ? error.message : String(error),
+                        error:
+                            error instanceof Error
+                                ? error.message
+                                : String(error),
                     }));
-                },
-                url
-            );
+            }, url);
 
             if (!response.success) {
-                this.logger.error(`Browser M3U8 fetch failed: ${response.error}`);
+                this.logger.log(
+                    `Browser M3U8 fetch failed: ${response.error}`,
+                    "error"
+                );
                 return null;
             }
 
             return this.parseM3U8Content(response.content, url);
         } catch (error) {
-            this.logger.error(`Error in browser M3U8 extraction: ${error}`);
+            this.logger.log(
+                `Error in browser M3U8 extraction: ${error}`,
+                "error"
+            );
             return null;
         }
     }
@@ -1250,70 +1407,99 @@ export class M3U8Processor {
         sessionHeaders?: Record<string, string>
     ): Promise<boolean> {
         if (!playlist.segments || playlist.segments.length === 0) {
-            this.logger.error("No segments found in playlist");
+            this.logger.log("No segments found in playlist", "error");
             return false;
         }
 
         if (!this.tempDir) {
-            this.tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "m3u8_download_"));
+            const uniqueId = `${Date.now()}_${Math.random()
+                .toString(36)
+                .substring(2, 9)}`;
+            this.tempDir = fs.mkdtempSync(
+                path.join(os.tmpdir(), `m3u8_download_${uniqueId}_`)
+            );
         }
 
         this.totalSegments = playlist.segments.length;
         this.completedSegments = 0;
         this.downloadStartTime = Date.now();
 
-        this.logger.info(`Starting browser download of ${this.totalSegments} segments...`);
+        this.logger.log(
+            `Starting browser download of ${this.totalSegments} segments...`,
+            "info"
+        );
         this.initializeProgressBar(this.totalSegments);
 
         let successCount = 0;
         const startTime = Date.now();
 
         // Simplified download function
-        const downloadSegment = async (segment: Segment, index: number): Promise<boolean> => {
+        const downloadSegment = async (
+            segment: Segment,
+            index: number
+        ): Promise<boolean> => {
             const segmentUrl = this.resolveUrl(segment.uri, baseUrl);
-            
+
             try {
                 const segmentData = await browserPage.evaluate(
-                    (params: { url: string; headers: Record<string, string> }) => {
+                    (params: {
+                        url: string;
+                        headers: Record<string, string>;
+                    }) => {
                         return fetch(params.url, {
                             method: "GET",
                             credentials: "include",
                             headers: params.headers,
                         })
-                        .then(response => {
-                            if (!response.ok) {
-                                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                            }
-                            return response.arrayBuffer();
-                        })
-                        .then(arrayBuffer => ({
-                            success: true,
-                            data: Array.from(new Uint8Array(arrayBuffer)),
-                        }))
-                        .catch(error => ({
-                            success: false,
-                            error: error instanceof Error ? error.message : String(error),
-                        }));
+                            .then((response) => {
+                                if (!response.ok) {
+                                    throw new Error(
+                                        `HTTP ${response.status}: ${response.statusText}`
+                                    );
+                                }
+                                return response.arrayBuffer();
+                            })
+                            .then((arrayBuffer) => ({
+                                success: true,
+                                data: Array.from(new Uint8Array(arrayBuffer)),
+                            }))
+                            .catch((error) => ({
+                                success: false,
+                                error:
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error),
+                            }));
                     },
                     {
                         url: segmentUrl,
                         headers: sessionHeaders || {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                            "User-Agent":
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                             Accept: "*/*",
                         },
                     }
                 );
 
                 if (segmentData.success) {
-                    const segmentFile = path.join(this.tempDir!, `segment_${index.toString().padStart(5, "0")}.ts`);
-                    fs.writeFileSync(segmentFile, Buffer.from(segmentData.data));
+                    const segmentFile = path.join(
+                        this.tempDir!,
+                        `segment_${index.toString().padStart(5, "0")}.ts`
+                    );
+                    fs.writeFileSync(
+                        segmentFile,
+                        Buffer.from(segmentData.data)
+                    );
                     this.segmentFiles.push(segmentFile);
                     successCount++;
                     this.incrementProgress();
                     return true;
                 }
             } catch (error) {
-                this.logger.debug(`Segment ${index + 1} failed: ${error}`);
+                this.logger.log(
+                    `Segment ${index + 1} failed: ${error}`,
+                    "debug"
+                );
             }
             return false;
         };
@@ -1329,13 +1515,14 @@ export class M3U8Processor {
                 };
 
                 const waitForSlot = () => {
-                    const availableIndex = semaphore.findIndex((slot) => slot === 0);
+                    const availableIndex = semaphore.findIndex(
+                        (slot) => slot === 0
+                    );
                     if (availableIndex !== -1) {
                         semaphore[availableIndex] = 1;
                         execute().finally(() => {
                             semaphore[availableIndex] = 0;
                         });
-                        
                     } else {
                         setTimeout(waitForSlot, 10);
                     }
@@ -1351,7 +1538,14 @@ export class M3U8Processor {
         const totalTime = (Date.now() - startTime) / 1000;
         const successRate = successCount / this.totalSegments;
 
-        this.logger.info(`Browser download: ${successCount}/${this.totalSegments} segments (${(successRate * 100).toFixed(1)}%) in ${totalTime.toFixed(1)}s`);
+        this.logger.log(
+            `Browser download: ${successCount}/${
+                this.totalSegments
+            } segments (${(successRate * 100).toFixed(
+                1
+            )}%) in ${totalTime.toFixed(1)}s`,
+            "info"
+        );
 
         return successRate >= 0.8;
     }

@@ -1,15 +1,14 @@
 import { chromium, Browser, BrowserContext, Page } from "playwright";
 import { BrowserConfig } from "../types/index.js";
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class ChromiumBrowser {
     private browser: Browser | null = null;
     private context: BrowserContext | null = null;
-    private logger: Logger;
+    private logger: LogAgent;
 
-    constructor() {
-        this.logger = createLogger("ChromiumBrowser");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("ChromiumBrowser");
     }
 
     async launch(config: BrowserConfig = {}): Promise<void> {
@@ -43,9 +42,12 @@ export class ChromiumBrowser {
                 javaScriptEnabled: config.javaScriptEnabled ?? true,
             });
 
-            this.logger.debug("Chromium browser launched");
+            this.logger.log("Chromium browser launched", "info");
         } catch (error) {
-            this.logger.error("Failed to launch Chromium browser:", error);
+            this.logger.log(
+                `Failed to launch Chromium browser: ${error}`,
+                "error"
+            );
             throw error;
         }
     }
@@ -65,18 +67,19 @@ export class ChromiumBrowser {
 
         if (url) {
             try {
-                this.logger.info(`Navigating to: ${url}`);
+                this.logger.log(`Navigating to: ${url}`, "info");
                 await page.goto(url, {
                     waitUntil: "domcontentloaded",
                     timeout: 30000,
                 });
-                this.logger.info("Page loaded successfully");
+                this.logger.log("Page loaded successfully", "info");
 
                 // Wait for dynamic content
                 await page.waitForTimeout(3000);
             } catch (error) {
-                this.logger.warn(
-                    `Page load timeout, but continuing anyway: ${error}`
+                this.logger.log(
+                    `Page load timeout, but continuing anyway: ${error}`,
+                    "warn"
                 );
             }
         }
@@ -87,14 +90,14 @@ export class ChromiumBrowser {
     private logRequest(request: any): void {
         const url = request.url();
         if (this.isVideoRelatedUrl(url)) {
-            this.logger.debug(`REQUEST: ${request.method()} ${url}`);
+            this.logger.log(`REQUEST: ${request.method()} ${url}`, "info");
         }
     }
 
     private logResponse(response: any): void {
         const url = response.url();
         if (this.isVideoRelatedUrl(url)) {
-            this.logger.info(`RESPONSE: ${response.status()} ${url}`);
+            this.logger.log(`RESPONSE: ${response.status()} ${url}`, "info");
         }
     }
 
@@ -107,10 +110,10 @@ export class ChromiumBrowser {
         try {
             if (this.browser) {
                 await this.browser.close();
-                this.logger.info("Chromium browser closed");
+                this.logger.log("Chromium browser closed", "info");
             }
         } catch (error) {
-            this.logger.warn(`Error closing Chromium browser: ${error}`);
+            this.logger.log(`Error closing Chromium browser: ${error}`, "warn");
         }
     }
 }

@@ -1,40 +1,39 @@
 import { Page, Frame } from "playwright";
-import { Logger } from "winston";
-import { createLogger } from "./Logger.js";
 import { RequestHandler } from "../handlers/RequestHandler.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class IFrameMonitor {
-    private logger: Logger;
+    private logger: LogAgent;
     private monitoredFrames: Set<string> = new Set();
 
-    constructor() {
-        this.logger = createLogger("IFrameMonitor");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("IFrameMonitor");
     }
 
     async setupMonitoring(
         page: Page,
         requestHandler: RequestHandler
     ): Promise<void> {
-        this.logger.info("Setting up iframe monitoring...");
+        this.logger.log("Setting up iframe monitoring...", "info");
 
         // Monitor existing frames
         await this.monitorExistingFrames(page, requestHandler);
 
         // Monitor new frames as they are created
         page.on("frameattached", async (frame) => {
-            this.logger.info(`New iframe attached: ${frame.url()}`);
+            this.logger.log(`New iframe attached: ${frame.url()}`, "info");
             await this.monitorFrame(frame, requestHandler);
         });
 
         // Monitor frame navigation
         page.on("framenavigated", async (frame) => {
             if (frame !== page.mainFrame()) {
-                this.logger.info(`Iframe navigated: ${frame.url()}`);
+                this.logger.log(`Iframe navigated: ${frame.url()}`, "info");
                 await this.monitorFrame(frame, requestHandler);
             }
         });
 
-        this.logger.info("Iframe monitoring setup complete");
+        this.logger.log("Iframe monitoring setup complete", "info");
     }
 
     private async monitorExistingFrames(
@@ -63,7 +62,7 @@ export class IFrameMonitor {
         this.monitoredFrames.add(frameUrl);
 
         if (this.isVideoRelatedFrame(frameUrl)) {
-            this.logger.info(`Monitoring video iframe: ${frameUrl}`);
+            this.logger.log(`Monitoring video iframe: ${frameUrl}`, "info");
 
             // Note: Frame doesn't have 'on' method in Playwright
             // Request/response monitoring is handled at the page level
@@ -99,7 +98,7 @@ export class IFrameMonitor {
 
     private async analyzeFrameContent(frame: Frame): Promise<void> {
         try {
-            this.logger.info(`Analyzing iframe content: ${frame.url()}`);
+            this.logger.log(`Analyzing iframe content: ${frame.url()}`, "info");
 
             // Wait for frame to load
             await frame.waitForLoadState("domcontentloaded", { timeout: 5000 });
@@ -168,7 +167,7 @@ export class IFrameMonitor {
                             }
                         }
                     } catch (e) {
-                        console.log("JWPlayer check failed:", e);
+                        this.logger.log(`JWPlayer check failed: ${e}`, "info");
                     }
                 }
 
@@ -187,23 +186,25 @@ export class IFrameMonitor {
             });
 
             if (videoElements.length > 0) {
-                this.logger.info(
-                    `Found ${videoElements.length} video elements in iframe`
+                this.logger.log(
+                    `Found ${videoElements.length} video elements in iframe`,
+                    "info"
                 );
 
                 for (const element of videoElements) {
-                    this.logger.info(
-                        `${element.type} (${element.element}): ${element.url}`
+                    this.logger.log(
+                        `${element.type} (${element.element}): ${element.url}`,
+                        "info"
                     );
                 }
             }
         } catch (error) {
-            this.logger.debug(`Error analyzing iframe content: ${error}`);
+            this.logger.log(`Error analyzing iframe content: ${error}`, "info");
         }
     }
 
     async waitForIframeContentLoad(page: Page): Promise<void> {
-        this.logger.info("Waiting for iframe content to fully load...");
+        this.logger.log("Waiting for iframe content to fully load...", "info");
 
         const frames = page.frames();
 
@@ -224,15 +225,17 @@ export class IFrameMonitor {
                     });
 
                     if (hasVideoElements) {
-                        this.logger.info(
-                            `Video player elements found in iframe: ${frame.url()}`
+                        this.logger.log(
+                            `Video player elements found in iframe: ${frame.url()}`,
+                            "info"
                         );
                         // Wait additional time for video player initialization
                         await page.waitForTimeout(3000);
                     }
                 } catch (error) {
-                    this.logger.debug(
-                        `Could not check iframe content: ${error}`
+                    this.logger.log(
+                        `Could not check iframe content: ${error}`,
+                        "debug"
                     );
                 }
             }

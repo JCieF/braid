@@ -1,24 +1,26 @@
 import { Page } from "playwright";
-import { Logger } from "winston";
-import { createLogger } from "../utils/Logger.js";
+import { LogAgent, Logger } from "../helpers/StringBuilder.js";
 
 export class PlayButtonHandler {
-    private logger: Logger;
+    private logger: LogAgent;
     private downloadCompleted: boolean = false;
     private shouldTerminate: boolean = false;
 
-    constructor() {
-        this.logger = createLogger("PlayButtonHandler");
+    constructor(logger: Logger) {
+        this.logger = logger.agent("PlayButtonHandler");
     }
 
     async handlePlayButtons(
         page: Page,
         maxAttempts: number = 2
     ): Promise<void> {
-        this.logger.info("Starting automatic play button handling...");
+        this.logger.log("Starting automatic play button handling...", "info");
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            this.logger.info(`Play button attempt ${attempt}/${maxAttempts}`);
+            this.logger.log(
+                `Play button attempt ${attempt}/${maxAttempts}`,
+                "info"
+            );
 
             // Try main page first
             let clicked = await this.tryClickPlayButton(page);
@@ -29,21 +31,23 @@ export class PlayButtonHandler {
             }
 
             if (clicked) {
-                this.logger.info(
-                    "Play button clicked! Waiting for video streams to load..."
+                this.logger.log(
+                    "Play button clicked! Waiting for video streams to load...",
+                    "info"
                 );
                 // Wait longer for video initialization
                 await page.waitForTimeout(12000);
 
                 // Try clicking additional play buttons if needed
-                this.logger.info(
-                    "Checking if additional play button clicks needed..."
+                this.logger.log(
+                    "Checking if additional play button clicks needed...",
+                    "info"
                 );
                 const additionalClick =
                     (await this.tryClickPlayButton(page, true)) ||
                     (await this.tryClickPlayButtonInIframes(page, true));
                 if (additionalClick) {
-                    this.logger.info("Additional play button clicked!");
+                    this.logger.log("Additional play button clicked!", "info");
                     await page.waitForTimeout(8000);
                 }
 
@@ -90,11 +94,14 @@ export class PlayButtonHandler {
         ];
 
         if (quickCheck) {
-            this.logger.info("Quick check for additional play buttons...");
+            this.logger.log(
+                "Quick check for additional play buttons...",
+                "info"
+            );
             // For quick check, only try the most common selectors
             playButtonSelectors.splice(8);
         } else {
-            this.logger.info("Looking for play button...");
+            this.logger.log("Looking for play button...", "info");
         }
 
         // Try play button in main frame first
@@ -110,23 +117,26 @@ export class PlayButtonHandler {
                             const isVisible = await button.isVisible();
 
                             if (isVisible) {
-                                this.logger.info(
-                                    `Clicking play button with selector: ${selector}`
+                                this.logger.log(
+                                    `Clicking play button with selector: ${selector}`,
+                                    "info"
                                 );
                                 await button.click({ timeout: 3000 });
                                 await page.waitForTimeout(3000);
                                 return true;
                             }
                         } catch (error) {
-                            this.logger.debug(
-                                `Failed to click play button ${i}: ${error}`
+                            this.logger.log(
+                                `Failed to click play button ${i}: ${error}`,
+                                "debug"
                             );
                         }
                     }
                 }
             } catch (error) {
-                this.logger.debug(
-                    `Error with play button selector ${selector}: ${error}`
+                this.logger.log(
+                    `Error with play button selector ${selector}: ${error}`,
+                    "debug"
                 );
             }
         }
@@ -149,8 +159,9 @@ export class PlayButtonHandler {
                                             await button.isVisible();
 
                                         if (isVisible) {
-                                            this.logger.info(
-                                                `Clicking play button in iframe with selector: ${selector}`
+                                            this.logger.log(
+                                                `Clicking play button in iframe with selector: ${selector}`,
+                                                "info"
                                             );
                                             await button.click({
                                                 timeout: 3000,
@@ -159,27 +170,30 @@ export class PlayButtonHandler {
                                             return true;
                                         }
                                     } catch (error) {
-                                        this.logger.debug(
-                                            `Failed to click iframe play button ${i}: ${error}`
+                                        this.logger.log(
+                                            `Failed to click iframe play button ${i}: ${error}`,
+                                            "debug"
                                         );
                                     }
                                 }
                             }
                         } catch (error) {
-                            this.logger.debug(
-                                `Error with iframe play button selector ${selector}: ${error}`
+                            this.logger.log(
+                                `Error with iframe play button selector ${selector}: ${error}`,
+                                "debug"
                             );
                         }
                     }
                 } catch (error) {
-                    this.logger.debug(
-                        `Error accessing iframe for play button: ${error}`
+                    this.logger.log(
+                        `Error accessing iframe for play button: ${error}`,
+                        "debug"
                     );
                 }
             }
         }
 
-        this.logger.info("No play button found or clicked");
+        this.logger.log("No play button found or clicked", "info");
         return false;
     }
 
@@ -187,7 +201,7 @@ export class PlayButtonHandler {
         page: Page,
         quickCheck: boolean = false
     ): Promise<boolean> {
-        this.logger.info("Looking for play button in iframes...");
+        this.logger.log("Looking for play button in iframes...", "info");
 
         const frames = page.frames();
 
@@ -198,8 +212,9 @@ export class PlayButtonHandler {
                 const frameUrl = frame.url();
                 if (!frameUrl || frameUrl === "about:blank") continue;
 
-                this.logger.info(
-                    `Checking iframe for play button: ${frameUrl}`
+                this.logger.log(
+                    `Checking iframe for play button: ${frameUrl}`,
+                    "info"
                 );
 
                 // Use the same selectors as main page
@@ -234,8 +249,9 @@ export class PlayButtonHandler {
                         });
 
                         if (isVisible) {
-                            this.logger.info(
-                                `Found play button in iframe with selector: ${selector}`
+                            this.logger.log(
+                                `Found play button in iframe with selector: ${selector}`,
+                                "info"
                             );
 
                             try {
@@ -247,16 +263,18 @@ export class PlayButtonHandler {
 
                                 // Click the button
                                 await button.click({ timeout: 5000 });
-                                this.logger.info(
-                                    `Successfully clicked play button in iframe: ${frameUrl}`
+                                this.logger.log(
+                                    `Successfully clicked play button in iframe: ${frameUrl}`,
+                                    "info"
                                 );
 
                                 // Wait for video to start
                                 await frame.waitForTimeout(3000);
                                 return true;
                             } catch (clickError) {
-                                this.logger.warn(
-                                    `Failed to click play button in iframe: ${clickError}`
+                                this.logger.log(
+                                    `Failed to click play button in iframe: ${clickError}`,
+                                    "warn"
                                 );
                                 continue;
                             }
@@ -267,14 +285,15 @@ export class PlayButtonHandler {
                     }
                 }
             } catch (frameError) {
-                this.logger.warn(
-                    `Error checking iframe ${frame.url()}: ${frameError}`
+                this.logger.log(
+                    `Error checking iframe ${frame.url()}: ${frameError}`,
+                    "warn"
                 );
                 continue;
             }
         }
 
-        this.logger.info("No play button found in any iframe");
+        this.logger.log("No play button found in any iframe", "info");
         return false;
     }
 
@@ -285,7 +304,7 @@ export class PlayButtonHandler {
     markDownloadCompleted(): void {
         this.downloadCompleted = true;
         this.shouldTerminate = true;
-        this.logger.info("Download marked as completed");
+        this.logger.log("Download marked as completed", "info");
     }
 
     shouldTerminateScript(): boolean {
