@@ -26,6 +26,7 @@ import { VideoDownloader } from "./VideoDownloader.js";
 // Main exports - Primary classes users will interact with
 export { VideoDownloader } from "./VideoDownloader.js";
 export { M3U8Processor } from "./utils/M3U8Processor.js";
+export { TitleScraper } from "./utils/TitleScraper.js";
 
 // Browser implementations
 export { FirefoxBrowser } from "./browsers/FirefoxBrowser.js";
@@ -58,34 +59,93 @@ export * from "./types/index.js";
 export default VideoDownloader;
 
 async function getInfo(e: any, url: string) {
-    // No scraper yet. Just return a dummy response.
+    // Lightweight title scraper - just extracts title info without downloading
     if (!url.startsWith("https://jav.guru")) return;
 
     e.stopPropagation();
 
-    return {
-        ok: true,
-        data: {
-            id: url,
-            title: url,
-            formats: [
-                {
-                    format_id: "mp4-720p",
-                    url,
-                    ext: "mp4",
-                    protocol: "https",
-                    http_headers: {
-                        "User-Agent":
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
-                        "Sec-Fetch-Mode": "navigate",
+    try {
+        // Create a simple logger for this operation
+        const simpleLogger = new Logger("getInfo", e.invokeEvent);
+        const logAgent = simpleLogger.agent("TitleScraper");
+        
+        // Create just the TitleScraper for lightweight title extraction
+        const { TitleScraper } = await import("./utils/TitleScraper.js");
+        const { FirefoxBrowser } = await import("./browsers/FirefoxBrowser.js");
+        
+        const titleScraper = new TitleScraper(logAgent);
+        
+        // Launch a minimal browser session just for title extraction
+        const browser = new FirefoxBrowser(simpleLogger);
+        await browser.launch({
+            headless: true,
+            viewport: { width: 1920, height: 1080 },
+            ignoreHTTPSErrors: true,
+            javaScriptEnabled: true,
+        });
+        
+        const page = await browser.getPage(url); // getPage() handles navigation and waiting
+        
+        // Extract title information
+        const titleInfo = await titleScraper.extractTitleInfo(page);
+        
+        // Close browser
+        await browser.close();
+
+        return {
+            ok: true,
+            data: {
+                id: titleInfo?.code || url,
+                title: titleInfo?.title || url,
+                titleInfo: titleInfo || undefined,
+                formats: [
+                    {
+                        format_id: "detected-stream",
+                        url: url, // The actual stream URL will be detected during download
+                        ext: "mp4",
+                        protocol: "https",
+                        http_headers: {
+                            "User-Agent":
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.5",
+                            "Sec-Fetch-Mode": "navigate",
+                        },
+                        format: "Stream (detected during download)",
                     },
-                    format: "720p MP4",
-                },
-            ],
-        },
-    };
+                ],
+            },
+        };
+
+    } catch (error) {
+        console.error("Error in getInfo:", error);
+        
+        // Fallback to dummy response
+        return {
+            ok: false,
+            data: {
+                id: url,
+                title: url,
+                error: error instanceof Error ? error.message : String(error),
+                formats: [
+                    {
+                        format_id: "mp4-720p",
+                        url,
+                        ext: "mp4",
+                        protocol: "https",
+                        http_headers: {
+                            "User-Agent":
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                            "Accept-Language": "en-US,en;q=0.5",
+                            "Sec-Fetch-Mode": "navigate",
+                        },
+                        format: "720p MP4",
+                    },
+                ],
+            },
+        };
+    }
 }
 
 async function downloadInternal(

@@ -59,6 +59,21 @@ export interface LoggerConfig {
     filename?: string;
 }
 
+export interface TitleInfo {
+    title: string;
+    originalTitle?: string;
+    code?: string;
+    actress?: string[];
+    studio?: string;
+    releaseDate?: string;
+    duration?: string;
+    genre?: string[];
+    description?: string;
+    coverImage?: string;
+    url: string;
+    extractedAt: number;
+}
+
 export interface VideoDownloaderConfig {
     completeLog: Logger;
     downloadId: string;

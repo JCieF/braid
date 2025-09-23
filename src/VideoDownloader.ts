@@ -8,6 +8,7 @@ import { StreamButtonHandler } from "./handlers/StreamButtonHandler.js";
 import { PopupHandler } from "./handlers/PopupHandler.js";
 import { PlayButtonHandler } from "./handlers/PlayButtonHandler.js";
 import { M3U8Processor } from "./utils/M3U8Processor.js";
+import { TitleScraper } from "./utils/TitleScraper.js";
 import { IFrameMonitor } from "./utils/IFrameMonitor.js";
 import { NetworkMonitor } from "./utils/NetworkMonitor.js";
 import { StreamHandler } from "./utils/StreamHandler.js";
@@ -17,6 +18,7 @@ import {
     VideoDownloaderConfig,
     VideoCandidate,
     BrowserType,
+    TitleInfo,
 } from "./types/index.js";
 import { LogAgent, Logger } from "./helpers/StringBuilder.js";
 
@@ -33,6 +35,7 @@ export class VideoDownloader {
     private popupHandler: PopupHandler;
     private playButtonHandler: PlayButtonHandler;
     private m3u8Processor: M3U8Processor;
+    private titleScraper: TitleScraper;
     private iframeMonitor: IFrameMonitor;
     private networkMonitor: NetworkMonitor;
     private streamHandler: StreamHandler;
@@ -46,6 +49,7 @@ export class VideoDownloader {
     private allVideoRequests: string[] = [];
     private capturedHeaders: Record<string, string> = {};
     private directUrlFound: boolean = false;
+    private titleInfo: TitleInfo | null = null;
 
     private completeLog: Logger;
     private logAgent: LogAgent;
@@ -75,6 +79,7 @@ export class VideoDownloader {
 
         this.completeLog = config.completeLog;
         this.logAgent = this.completeLog.agent("VideoDownloader");
+        this.titleScraper = new TitleScraper(this.completeLog.agent("TitleScraper"));
     }
 
     log(text: string, type: string) {
@@ -110,6 +115,17 @@ export class VideoDownloader {
 
             this.log("Waiting for page to fully load...", "debug");
             await this.pageHelper.waitForJWPlayerInitialization(this.page);
+
+            // Extract title information first
+            this.log("Extracting title information...", "debug");
+            this.titleInfo = await this.titleScraper.extractTitleInfo(this.page);
+            if (this.titleInfo) {
+                this.log("Title information extracted successfully", "info");
+                this.log(`Title: ${this.titleInfo.title}`, "debug");
+                if (this.titleInfo.code) this.log(`Code: ${this.titleInfo.code}`, "debug");
+            } else {
+                this.log("Could not extract title information", "warn");
+            }
 
             this.log("Handling popups and modals...", "debug");
             await this.popupHandler.closePopups(this.page);
@@ -1597,8 +1613,81 @@ export class VideoDownloader {
         return this.directUrlFound;
     }
 
+    public getTitleInfo(): TitleInfo | null {
+        return this.titleInfo;
+    }
+
+    public hasTitleInfo(): boolean {
+        return this.titleInfo !== null;
+    }
+
+    public formatTitleInfo(): string {
+        if (!this.titleInfo) {
+            return "No title information available";
+        }
+        return this.titleScraper.formatTitleInfo(this.titleInfo);
+    }
+
     public setDirectUrlFound(found: boolean): void {
         this.directUrlFound = found;
+    }
+
+    /**
+     * Initialize browser and extract title info without full download process
+     * This is used by the getInfo function for quick title extraction
+     */
+    public async initializeBrowserAndExtractTitle(): Promise<boolean> {
+        try {
+            const browserType = await this.browserHelper.selectBestBrowser(
+                this.config.browserType
+            );
+
+            this.log(`Starting title extraction with ${browserType.toUpperCase()}`, "info");
+
+            await this.initializeBrowser(browserType);
+
+            if (!this.page) {
+                throw new Error("Failed to initialize page");
+            }
+
+            await this.setupComprehensiveMonitoring();
+
+            this.log("Waiting for page to fully load...", "debug");
+            await this.pageHelper.waitForJWPlayerInitialization(this.page);
+
+            // Extract title information
+            this.log("Extracting title information...", "debug");
+            this.titleInfo = await this.titleScraper.extractTitleInfo(this.page);
+            if (this.titleInfo) {
+                this.log("Title information extracted successfully", "info");
+                this.log(`Title: ${this.titleInfo.title}`, "debug");
+                if (this.titleInfo.code) this.log(`Code: ${this.titleInfo.code}`, "debug");
+            } else {
+                this.log("Could not extract title information", "warn");
+            }
+
+            // Collect any video candidates that were found during monitoring
+            const networkCandidates = this.networkMonitor.getVideoCandidates();
+            const requestCandidates = this.requestHandler.getVideoCandidates();
+
+            this.videoCandidates = [
+                ...this.videoCandidates,
+                ...networkCandidates.filter(
+                    (nc) =>
+                        !this.videoCandidates.some((vc) => vc.url === nc.url)
+                ),
+                ...requestCandidates.filter(
+                    (rc) =>
+                        !this.videoCandidates.some((vc) => vc.url === rc.url)
+                ),
+            ];
+
+            return this.titleInfo !== null;
+
+        } catch (error) {
+            this.log(`Title extraction failed: ${error}`, "error");
+            return false;
+        }
     }
 
     // Download monitoring setup
