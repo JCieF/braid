@@ -55,6 +55,17 @@ export { PageHelper } from "./helpers/PageHelper.js";
 // Type definitions for TypeScript users
 export * from "./types/index.js";
 
+// Creator metadata scrapers (for data yt-dlp cannot extract)
+export { CreatorMetadataManager } from "./scrapers/CreatorMetadataManager.js";
+export { CreatorMetadataScraper } from "./scrapers/CreatorMetadataScraper.js";
+export { YouTubeScraper } from "./scrapers/YouTubeScraper.js";
+export { TikTokScraper } from "./scrapers/TikTokScraper.js";
+export { TwitterScraper } from "./scrapers/TwitterScraper.js";
+export { InstagramScraper } from "./scrapers/InstagramScraper.js";
+export { RedditScraper } from "./scrapers/RedditScraper.js";
+export { FacebookScraper } from "./scrapers/FacebookScraper.js";
+export { TwitchScraper } from "./scrapers/TwitchScraper.js";
+
 // Default export for convenience
 export default VideoDownloader;
 

@@ -15,25 +15,31 @@ export class FirefoxBrowser {
     async launch(config: BrowserConfig = {}): Promise<void> {
         this.config = config;
         try {
-            this.browser = await firefox.launch({
+            const launchOptions: any = {
                 headless: config.headless ?? true,
-                // Use minimal args - custom args were causing context closure issues
                 args: [],
-            });
+            };
 
-            this.context = await this.browser.newContext({
+            if (config.firefoxUserDataDir) {
+                launchOptions.firefoxUserDataDir = config.firefoxUserDataDir;
+            }
+
+            this.browser = await firefox.launch(launchOptions);
+
+            const contextOptions: any = {
                 viewport: config.viewport ?? { width: 1920, height: 1080 },
                 userAgent:
                     config.userAgent ??
                     "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0",
                 ignoreHTTPSErrors: config.ignoreHTTPSErrors ?? true,
                 javaScriptEnabled: config.javaScriptEnabled ?? true,
-                // Firefox-specific settings
                 permissions: [],
                 extraHTTPHeaders: {
                     "Accept-Language": "en-US,en;q=0.9",
                 },
-            });
+            };
+
+            this.context = await this.browser.newContext(contextOptions);
 
             this.logger.log(
                 "Firefox browser launched with enhanced privacy settings",

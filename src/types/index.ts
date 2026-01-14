@@ -20,6 +20,7 @@ export interface BrowserConfig {
     ignoreHTTPSErrors?: boolean;
     javaScriptEnabled?: boolean;
     disableImages?: boolean;
+    firefoxUserDataDir?: string;
 }
 
 export interface DownloadConfig {
@@ -83,4 +84,140 @@ export interface VideoDownloaderConfig {
     downloadConfig?: DownloadConfig;
     browserConfig?: BrowserConfig;
     loggerConfig?: LoggerConfig;
+}
+
+/**
+ * Creator metadata that cannot be extracted by yt-dlp
+ * These fields require web scraping or API access
+ */
+export interface CreatorMetadata {
+    creator_id?: string;
+    creator_name?: string;
+    creator_username?: string;
+    creator_avatar_url?: string;
+    creator_bio?: string;
+    creator_follower_count?: number;
+    creator_verified?: boolean;
+    platform: string;
+    extractedAt: number;
+    url: string;
+}
+
+/**
+ * Video/Post metadata that cannot be extracted by yt-dlp
+ * These fields require web scraping or API access
+ * Platform-specific fields that yt-dlp doesn't support
+ */
+export interface VideoMetadata {
+    video_id?: string;
+    shortcode?: string;
+    like_count?: number;
+    comment_count?: number;
+    view_count?: number;
+    share_count?: number;
+    save_count?: number;
+    play_count?: number;
+    reach?: number;
+    timestamp?: number;
+    location?: string;
+    location_latitude?: number;
+    location_longitude?: number;
+    music_id?: string;
+    music_title?: string;
+    music_artist?: string;
+    effect_ids?: string[];
+    is_carousel?: boolean;
+    carousel_media_count?: number;
+    is_video?: boolean;
+    is_photo?: boolean;
+    caption?: string;
+    hashtags?: string[];
+    mentions?: string[];
+    tagged_users?: string[];
+    archived?: boolean;
+    platform: string;
+    extractedAt: number;
+    url: string;
+    requiresLogin?: boolean;
+    // YouTube-specific fields that yt-dlp cannot fully extract
+    embeddable?: boolean;
+    dimension?: string;
+    projection?: string;
+    madeForKids?: boolean;
+    isShort?: boolean;
+    isLive?: boolean;
+    isUpcoming?: boolean;
+    hasCaptions?: boolean;
+    isUnlisted?: boolean;
+    isAgeRestricted?: boolean;
+    category?: string;
+    defaultLanguage?: string;
+    
+    // Reddit-specific fields that yt-dlp cannot extract
+    upvote_ratio?: number;
+    is_self?: boolean;
+    is_gallery?: boolean;
+    spoiler?: boolean;
+    locked?: boolean;
+    stickied?: boolean;
+    over_18?: boolean;
+    link_flair_text?: string;
+    link_flair_css_class?: string;
+    domain?: string;
+    selftext_html?: string;
+    author_fullname?: string;
+    subreddit_id?: string;
+    thumbnail_height?: number;
+    thumbnail_width?: number;
+
+    // Twitch-specific fields that yt-dlp cannot extract
+    // VOD fields
+    stream_id?: string;
+    published_at?: string;
+    muted_segments?: Array<{ offset: number; duration: number }>;
+    vod_type?: string; // "ARCHIVE", "HIGHLIGHT", or "UPLOAD"
+    // Clip fields
+    embed_url?: string;
+    source_video_id?: string;
+    vod_offset?: number;
+    is_featured?: boolean;
+    clip_creator_id?: string;
+    // Stream/Channel fields
+    game_id?: string;
+    game_name?: string;
+    is_mature?: boolean;
+    tags?: string[]; // Stream tags
+    content_classification_labels?: string[];
+    is_branded_content?: boolean;
+    // Content type detection
+    twitch_content_type?: "vod" | "clip" | "stream" | "channel";
+
+    // TikTok-specific fields that yt-dlp cannot extract
+    embed_link?: string; // Embed URL (yt-dlp can't get)
+    playlist_id?: string; // Playlist ID (Research API only)
+    voice_to_text?: string; // Transcript (Research API only)
+    region_code?: string; // Regional data (Research API only)
+}
+
+/**
+ * Platform type for metadata scraping
+ */
+export type PlatformType = "youtube" | "tiktok" | "facebook" | "twitter" | "instagram" | "reddit" | "twitch" | "unknown";
+
+/**
+ * Configuration for creator metadata scraping
+ */
+export interface CreatorMetadataScraperConfig {
+    browserType?: BrowserType;
+    browserConfig?: BrowserConfig;
+    timeout?: number;
+    retries?: number;
+}
+
+/**
+ * Combined metadata result containing both creator and video metadata
+ */
+export interface ExtendedMetadata {
+    creator?: CreatorMetadata;
+    video?: VideoMetadata;
 }
