@@ -152,6 +152,13 @@ export interface VideoMetadata {
     isAgeRestricted?: boolean;
     category?: string;
     defaultLanguage?: string;
+    // YouTube fields that yt-dlp can get (for fallback)
+    duration?: number;
+    channel_id?: string;
+    channel_name?: string;
+    thumbnails?: string[];
+    definition?: string;
+    concurrentViewers?: number;
     
     // Reddit-specific fields that yt-dlp cannot extract
     upvote_ratio?: number;

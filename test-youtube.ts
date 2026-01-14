@@ -42,9 +42,32 @@ async function testYouTube() {
 
             if (video) {
                 console.log("\n[VIDEO METADATA]");
-                console.log("Video ID:", video.video_id || "N/A");
-                console.log("Mentions:", video.mentions ? video.mentions.join(", ") : "N/A");
                 const ytVideo = video as any;
+                
+                // Fields that yt-dlp can get (now also extracted by scraper)
+                console.log("\n---Fields that yt-dlp can also get ---");
+                console.log("Video ID:", video.video_id || "N/A");
+                // Title is stored in caption, description might be appended after newlines
+                const captionParts = video.caption ? video.caption.split('\n\n') : [];
+                console.log("Title:", captionParts[0] ? captionParts[0].substring(0, 80) + "..." : "N/A");
+                console.log("Description:", captionParts[1] ? captionParts[1].substring(0, 150) + "..." : (captionParts[0] && captionParts[0].length > 80 ? captionParts[0].substring(80, 230) + "..." : "N/A"));
+                console.log("View Count:", video.view_count || "N/A");
+                console.log("Like Count:", video.like_count || "N/A");
+                console.log("Comment Count:", video.comment_count || "N/A");
+                console.log("Timestamp:", video.timestamp ? new Date(video.timestamp * 1000).toISOString() : "N/A");
+                console.log("Hashtags:", video.hashtags ? video.hashtags.join(", ") : "N/A");
+                console.log("Duration:", ytVideo.duration ? `${Math.floor(ytVideo.duration / 60)}:${String(ytVideo.duration % 60).padStart(2, '0')}` : "N/A");
+                console.log("Channel ID:", ytVideo.channel_id || "N/A");
+                console.log("Channel Name:", ytVideo.channel_name || "N/A");
+                console.log("Definition:", ytVideo.definition || "N/A");
+                console.log("Thumbnails:", ytVideo.thumbnails ? `${ytVideo.thumbnails.length} thumbnails` : "N/A");
+                if (ytVideo.isLive) {
+                    console.log("Concurrent Viewers:", ytVideo.concurrentViewers || "N/A");
+                }
+                
+                // Fields that yt-dlp cannot get (scraper-only)
+                console.log("\n--- Scraper-Only Fields ---");
+                console.log("Mentions:", video.mentions ? video.mentions.join(", ") : "N/A");
                 console.log("Embeddable:", ytVideo.embeddable ?? "N/A");
                 console.log("Dimension:", ytVideo.dimension || "N/A");
                 console.log("Projection:", ytVideo.projection || "N/A");
