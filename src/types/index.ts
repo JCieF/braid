@@ -177,19 +177,28 @@ export interface VideoMetadata {
     thumbnail_height?: number;
     thumbnail_width?: number;
 
-    // Twitch-specific fields that yt-dlp cannot extract
-    // VOD fields
+    // Twitch-specific fields
+    // Basic fields (yt-dlp can get, but we extract for completeness)
+    title?: string;
+    description?: string;
+    created_at?: string;
+    language?: string;
+    thumbnail_url?: string;
+    user_id?: string;
+    user_login?: string;
+    user_name?: string;
+    viewer_count?: number; // For streams
+    started_at?: string; // For streams
+    // Gap fields (yt-dlp cannot extract)
     stream_id?: string;
     published_at?: string;
     muted_segments?: Array<{ offset: number; duration: number }>;
     vod_type?: string; // "ARCHIVE", "HIGHLIGHT", or "UPLOAD"
-    // Clip fields
     embed_url?: string;
     source_video_id?: string;
     vod_offset?: number;
     is_featured?: boolean;
     clip_creator_id?: string;
-    // Stream/Channel fields
     game_id?: string;
     game_name?: string;
     is_mature?: boolean;

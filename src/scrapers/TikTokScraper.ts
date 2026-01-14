@@ -102,14 +102,45 @@ export class TikTokScraper extends CreatorMetadataScraper {
             const verifiedSelectors = [
                 '[data-e2e="verified-icon"]',
                 '.verified-badge',
-                '[aria-label*="Verified"]'
+                '[aria-label*="Verified"]',
+                '[title*="Verified"]',
+                'svg[data-e2e="verified-icon"]',
+                '[class*="verified"]',
+                '[class*="Verified"]'
             ];
 
+            metadata.creator_verified = false;
             for (const selector of verifiedSelectors) {
                 const verified = await page.locator(selector).first();
                 if (await verified.isVisible({ timeout: 2000 }).catch(() => false)) {
                     metadata.creator_verified = true;
+                    this.logger.log(`Found verified badge with selector: ${selector}`, "debug");
                     break;
+                }
+            }
+            
+            if (!metadata.creator_verified) {
+                try {
+                    const verifiedInPage = await page.evaluate(() => {
+                        const elements = document.querySelectorAll('*');
+                        for (const el of elements) {
+                            const ariaLabel = el.getAttribute('aria-label');
+                            const title = el.getAttribute('title');
+                            const className = el.className || '';
+                            if ((ariaLabel && ariaLabel.toLowerCase().includes('verified')) || 
+                                (title && title.toLowerCase().includes('verified')) ||
+                                (className && className.toLowerCase().includes('verified'))) {
+                                return true;
+                            }
+                        }
+                        return false;
+                    });
+                    if (verifiedInPage) {
+                        metadata.creator_verified = true;
+                        this.logger.log("Found verified badge via page evaluation", "debug");
+                    }
+                } catch (e) {
+                    this.logger.log(`Error checking verified status: ${e}`, "debug");
                 }
             }
 
@@ -138,11 +169,14 @@ export class TikTokScraper extends CreatorMetadataScraper {
                         allApiResponses.push({ url, data: json });
                         
                         const hasVideoData = url.includes("item_list") || 
+                            url.includes("itemList") ||
+                            url.includes("/post/item_list") ||
+                            url.includes("/api/post/item_list") ||
+                            url.includes("related/item_list") ||
                             url.includes("video") || 
                             url.includes("post") ||
                             url.includes("item/detail") ||
                             url.includes("aweme/detail") ||
-                            url.includes("post/item_list") ||
                             url.includes("item/info") ||
                             url.includes("feed") ||
                             url.includes("aweme/v1") ||
@@ -244,6 +278,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
             const domData = await this.extractTikTokDOMData(page);
             if (domData) {
                 this.logger.log(`Extracted ${Object.keys(domData).length} fields from DOM`, "debug");
+                this.logger.log(`DOM data keys: ${Object.keys(domData).join(", ")}`, "debug");
                 if (domData.embed_link && !metadata.embed_link) metadata.embed_link = domData.embed_link;
                 if (domData.hashtags && !metadata.hashtags) {
                     metadata.hashtags = domData.hashtags;
@@ -259,6 +294,14 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 }
             } else {
                 this.logger.log("No data extracted from DOM", "debug");
+            }
+            
+            this.logger.log(`Final metadata keys: ${Object.keys(metadata).join(", ")}`, "debug");
+            if (metadata.effect_ids) {
+                this.logger.log(`Final effect_ids: ${Array.isArray(metadata.effect_ids) ? metadata.effect_ids.join(", ") : metadata.effect_ids}`, "info");
+            }
+            if (metadata.hashtags) {
+                this.logger.log(`Final hashtags: ${Array.isArray(metadata.hashtags) ? metadata.hashtags.join(", ") : metadata.hashtags}`, "info");
             }
 
             this.logger.log("Successfully extracted TikTok video metadata", "info");
@@ -652,14 +695,24 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     const extractVideoData = (videoData: any, source: string) => {
                         if (!videoData || !response?.data) return;
                         
-                        const videoKeys = Object.keys(videoData).slice(0, 50);
-                        this.logger.log(`${source} video keys (first 50): ${videoKeys.join(", ")}`, "debug");
+                        const videoKeys = Object.keys(videoData);
+                        this.logger.log(`${source} video keys (first 50): ${videoKeys.slice(0, 50).join(", ")}`, "debug");
+                        if (videoKeys.length > 50) {
+                            this.logger.log(`${source} video has ${videoKeys.length} total keys (showing first 50)`, "debug");
+                        }
+                        
+                        const hasEffectStickers = videoKeys.includes('effectStickers');
+                        if (hasEffectStickers) {
+                            this.logger.log(`${source} has effectStickers key`, "debug");
+                        }
                         
                         if (videoData.effectStickers) {
                             this.logger.log(`${source} effectStickers type: ${Array.isArray(videoData.effectStickers) ? 'array' : typeof videoData.effectStickers}, length: ${Array.isArray(videoData.effectStickers) ? videoData.effectStickers.length : 'N/A'}`, "debug");
                             if (Array.isArray(videoData.effectStickers) && videoData.effectStickers.length > 0) {
                                 this.logger.log(`${source} effectStickers sample: ${JSON.stringify(videoData.effectStickers[0])}`, "debug");
                             }
+                        } else {
+                            this.logger.log(`${source} no effectStickers found (checked ${videoKeys.length} keys)`, "debug");
                         }
                         
                         if (videoData.desc) {
@@ -720,8 +773,10 @@ export class TikTokScraper extends CreatorMetadataScraper {
                         }
                         
                         if (!response.data.effect_ids && videoData.effectStickers) {
+                            this.logger.log(`${source} has effectStickers, type: ${typeof videoData.effectStickers}, isArray: ${Array.isArray(videoData.effectStickers)}`, "debug");
                             let effects: string[] = [];
                             if (Array.isArray(videoData.effectStickers)) {
+                                this.logger.log(`${source} effectStickers array length: ${videoData.effectStickers.length}`, "debug");
                                 effects = videoData.effectStickers
                                     .map((e: any) => {
                                         if (typeof e === 'string') return e;
@@ -730,7 +785,8 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                     })
                                     .filter(Boolean)
                                     .map(String);
-                            } else if (typeof videoData.effectStickers === 'object') {
+                                this.logger.log(`${source} extracted effect IDs: ${effects.join(", ")}`, "debug");
+                            } else if (typeof videoData.effectStickers === 'object' && videoData.effectStickers !== null) {
                                 const effectObj = videoData.effectStickers;
                                 if (effectObj.ID) effects.push(String(effectObj.ID));
                                 if (effectObj.id) effects.push(String(effectObj.id));

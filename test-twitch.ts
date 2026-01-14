@@ -70,25 +70,68 @@ async function testSingleUrl() {
     try {
         console.log(`\nTesting URL: ${url}\n`);
 
-        console.log("--- Video Metadata ---");
         const videoMetadata = await scraper.extractVideoMetadata(page, url);
         if (videoMetadata) {
-            console.log(JSON.stringify(videoMetadata, null, 2));
+            // Organize fields by category
+            const basicFields = [
+                "video_id", "title", "description", "created_at", "published_at",
+                "url", "thumbnail_url", "view_count", "viewer_count", "language", "duration",
+                "user_id", "user_login", "user_name", "started_at"
+            ];
             
-            // Highlight the yt-dlp gap fields
-            console.log("\n--- ---");
             const gapFields = [
-                "stream_id", "published_at", "muted_segments", "vod_type",
+                "stream_id", "muted_segments", "vod_type",
                 "embed_url", "source_video_id", "vod_offset", "is_featured", "clip_creator_id",
                 "game_id", "game_name", "is_mature", "tags",
                 "content_classification_labels", "is_branded_content"
             ];
-            for (const field of gapFields) {
+
+            const contentType = videoMetadata.twitch_content_type || "unknown";
+            
+            console.log(`=== Twitch ${contentType.toUpperCase()} Metadata ===\n`);
+            
+            // Basic fields (yt-dlp can get)
+            console.log("--- Basic Fields (yt-dlp can get) ---");
+            let basicCount = 0;
+            for (const field of basicFields) {
                 const value = (videoMetadata as any)[field];
-                if (value !== undefined) {
+                if (value !== undefined && value !== null) {
                     console.log(`  ${field}: ${JSON.stringify(value)}`);
+                    basicCount++;
                 }
             }
+            if (basicCount === 0) {
+                console.log("  (none extracted)");
+            }
+
+            // Gap fields (yt-dlp cannot get)
+            console.log("\n--- Gap Fields (yt-dlp cannot get) ---");
+            let gapCount = 0;
+            for (const field of gapFields) {
+                const value = (videoMetadata as any)[field];
+                if (value !== undefined && value !== null) {
+                    console.log(`  ${field}: ${JSON.stringify(value)}`);
+                    gapCount++;
+                }
+            }
+            if (gapCount === 0) {
+                console.log("  (none extracted)");
+            }
+
+            // Summary
+            const totalFields = Object.keys(videoMetadata).filter(k => 
+                k !== 'platform' && k !== 'extractedAt' && k !== 'url' && k !== 'twitch_content_type'
+            ).length;
+            
+            console.log("\n--- Summary ---");
+            console.log(`  Content Type: ${contentType}`);
+            console.log(`  Basic Fields Extracted: ${basicCount}`);
+            console.log(`  Gap Fields Extracted: ${gapCount}`);
+            console.log(`  Total Fields: ${totalFields}`);
+
+            // Full JSON for debugging
+            console.log("\n--- Full Metadata (JSON) ---");
+            console.log(JSON.stringify(videoMetadata, null, 2));
         } else {
             console.log("No video metadata extracted");
         }

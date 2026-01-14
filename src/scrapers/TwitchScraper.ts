@@ -148,22 +148,80 @@ export class TwitchScraper extends CreatorMetadataScraper {
             metadata.video_id = videoId;
         }
 
-        // VideoMetadata operation - contains publishedAt, game info
+        // VideoMetadata operation - contains all basic video info
         const videoMetadata = gqlData.get("VideoMetadata");
         if (videoMetadata?.video) {
             const video = videoMetadata.video;
+            // Basic fields yt-dlp can get
+            if (video.id) metadata.video_id = video.id;
+            if (video.title) metadata.title = video.title;
+            if (video.description !== undefined && video.description !== null) metadata.description = video.description;
+            if (video.createdAt) metadata.created_at = video.createdAt;
             if (video.publishedAt) metadata.published_at = video.publishedAt;
+            if (video.viewCount !== undefined) metadata.view_count = video.viewCount;
+            if (video.lengthSeconds !== undefined) metadata.duration = video.lengthSeconds;
+            if (video.language) metadata.language = video.language;
+            if (video.previewThumbnailURL) metadata.thumbnail_url = video.previewThumbnailURL;
+            // Owner/user info
+            if (video.owner) {
+                if (video.owner.id) metadata.user_id = video.owner.id;
+                if (video.owner.login) metadata.user_login = video.owner.login;
+                if (video.owner.displayName) metadata.user_name = video.owner.displayName;
+            }
+            // Game info (gap fields)
             if (video.game?.id) metadata.game_id = video.game.id;
             if (video.game?.name) metadata.game_name = video.game.name;
         }
 
-        // NielsenContentMetadata - backup for createdAt/game
+        // NielsenContentMetadata - backup for basic fields
         const nielsenData = gqlData.get("NielsenContentMetadata");
         if (nielsenData?.video) {
             const video = nielsenData.video;
+            if (!metadata.video_id && video.id) metadata.video_id = video.id;
+            if (!metadata.title && video.title) metadata.title = video.title;
+            if (!metadata.created_at && video.createdAt) metadata.created_at = video.createdAt;
             if (!metadata.published_at && video.createdAt) metadata.published_at = video.createdAt;
             if (!metadata.game_id && video.game?.id) metadata.game_id = video.game.id;
             if (!metadata.game_name && video.game?.displayName) metadata.game_name = video.game.displayName;
+            if (video.owner) {
+                if (!metadata.user_id && video.owner.id) metadata.user_id = video.owner.id;
+                if (!metadata.user_login && video.owner.login) metadata.user_login = video.owner.login;
+            }
+        }
+
+        // AdRequestHandling - isMature, broadcastType, and backup for basic fields
+        const adData = gqlData.get("AdRequestHandling");
+        if (adData?.video) {
+            // Basic fields backup
+            if (!metadata.video_id && adData.video.id) metadata.video_id = adData.video.id;
+            if (!metadata.title && adData.video.title) metadata.title = adData.video.title;
+            if (adData.video.lengthSeconds !== undefined && metadata.duration === undefined) {
+                metadata.duration = adData.video.lengthSeconds;
+            }
+            if (adData.video.owner) {
+                if (!metadata.user_id && adData.video.owner.id) metadata.user_id = adData.video.owner.id;
+                if (!metadata.user_login && adData.video.owner.login) metadata.user_login = adData.video.owner.login;
+                if (!metadata.user_name && adData.video.owner.displayName) metadata.user_name = adData.video.owner.displayName;
+            }
+            if (adData.video.game) {
+                if (!metadata.game_id && adData.video.game.id) metadata.game_id = adData.video.game.id;
+                if (!metadata.game_name && adData.video.game.name) metadata.game_name = adData.video.game.name;
+            }
+            // Gap fields
+            if (adData.video.owner?.broadcastSettings?.isMature !== undefined) {
+                metadata.is_mature = adData.video.owner.broadcastSettings.isMature;
+            }
+            if (adData.video.broadcastType) {
+                metadata.vod_type = adData.video.broadcastType;
+            }
+        }
+
+        // ChannelVideoCore - backup for user info
+        const channelVideo = gqlData.get("ChannelVideoCore");
+        if (channelVideo?.video?.owner) {
+            if (!metadata.user_id && channelVideo.video.owner.id) metadata.user_id = channelVideo.video.owner.id;
+            if (!metadata.user_login && channelVideo.video.owner.login) metadata.user_login = channelVideo.video.owner.login;
+            if (!metadata.user_name && channelVideo.video.owner.displayName) metadata.user_name = channelVideo.video.owner.displayName;
         }
 
         // VideoPlayer_VODSeekbarPreviewVideo - contains seekPreviewsURL with broadcast ID
@@ -216,27 +274,26 @@ export class TwitchScraper extends CreatorMetadataScraper {
             }
         }
 
-        // AdRequestHandling - isMature and broadcastType
-        const adData = gqlData.get("AdRequestHandling");
-        if (adData?.video) {
-            if (adData.video.owner?.broadcastSettings?.isMature !== undefined) {
-                metadata.is_mature = adData.video.owner.broadcastSettings.isMature;
-            }
-            if (adData.video.broadcastType) {
-                metadata.vod_type = adData.video.broadcastType;
-            }
-        }
-
-        // WatchTrackQuery - backup for broadcastType
+        // WatchTrackQuery - backup for broadcastType and view count
         const watchData = gqlData.get("WatchTrackQuery");
-        if (!metadata.vod_type && watchData?.video?.broadcastType) {
-            metadata.vod_type = watchData.video.broadcastType;
+        if (watchData?.video) {
+            if (!metadata.vod_type && watchData.video.broadcastType) {
+                metadata.vod_type = watchData.video.broadcastType;
+            }
+            if (metadata.view_count === undefined && watchData.video.viewCount !== undefined) {
+                metadata.view_count = watchData.video.viewCount;
+            }
         }
 
         // PlayerTrackingContextQuery - another backup for broadcastType
         const playerTracking = gqlData.get("PlayerTrackingContextQuery");
-        if (!metadata.vod_type && playerTracking?.video?.broadcastType) {
-            metadata.vod_type = playerTracking.video.broadcastType;
+        if (playerTracking?.video) {
+            if (!metadata.vod_type && playerTracking.video.broadcastType) {
+                metadata.vod_type = playerTracking.video.broadcastType;
+            }
+            if (metadata.view_count === undefined && playerTracking.video.viewCount !== undefined) {
+                metadata.view_count = playerTracking.video.viewCount;
+            }
         }
     }
 
@@ -255,7 +312,7 @@ export class TwitchScraper extends CreatorMetadataScraper {
             if (clip.video?.id) metadata.source_video_id = clip.video.id;
         }
 
-        // ChannelClipCore - contains isFeatured
+        // ChannelClipCore - contains isFeatured and broadcaster info
         const clipCore = gqlData.get("ChannelClipCore");
         if (clipCore?.clip) {
             const clip = clipCore.clip;
@@ -263,12 +320,34 @@ export class TwitchScraper extends CreatorMetadataScraper {
             if (clip.videoOffsetSeconds !== undefined && metadata.vod_offset === undefined) {
                 metadata.vod_offset = clip.videoOffsetSeconds;
             }
+            // Broadcaster info
+            if (clip.broadcaster) {
+                if (!metadata.user_id && clip.broadcaster.id) metadata.user_id = clip.broadcaster.id;
+                if (!metadata.user_login && clip.broadcaster.login) metadata.user_login = clip.broadcaster.login;
+                if (!metadata.user_name && clip.broadcaster.displayName) metadata.user_name = clip.broadcaster.displayName;
+            }
         }
 
-        // FeedInteractionHook_GetClipBySlug - contains game info
+        // FeedInteractionHook_GetClipBySlug - contains all basic clip info
         const feedClip = gqlData.get("FeedInteractionHook_GetClipBySlug");
         if (feedClip?.clip) {
             const clip = feedClip.clip;
+            // Basic fields yt-dlp can get
+            if (clip.id) metadata.video_id = clip.id;
+            if (clip.slug) metadata.video_id = clip.slug; // Use slug as video_id for clips
+            if (clip.title) metadata.title = clip.title;
+            if (clip.viewCount !== undefined) metadata.view_count = clip.viewCount;
+            if (clip.createdAt) metadata.created_at = clip.createdAt;
+            if (clip.durationSeconds !== undefined) metadata.duration = clip.durationSeconds;
+            if (clip.language) metadata.language = clip.language;
+            if (clip.thumbnailURL) metadata.thumbnail_url = clip.thumbnailURL;
+            // Broadcaster info
+            if (clip.broadcaster) {
+                if (!metadata.user_id && clip.broadcaster.id) metadata.user_id = clip.broadcaster.id;
+                if (!metadata.user_login && clip.broadcaster.login) metadata.user_login = clip.broadcaster.login;
+                if (!metadata.user_name && clip.broadcaster.displayName) metadata.user_name = clip.broadcaster.displayName;
+            }
+            // Game info (gap fields)
             if (clip.game?.id) metadata.game_id = clip.game.id;
             if (clip.game?.name) metadata.game_name = clip.game.name;
         }
@@ -355,12 +434,42 @@ export class TwitchScraper extends CreatorMetadataScraper {
             metadata.is_mature = videoMetadata.user.broadcastSettings.isMature;
         }
 
-        // UseViewCount or similar - game info backup
+        // UseViewCount - stream info and game
         const useViewCount = gqlData.get("UseViewCount");
-        if (useViewCount?.user?.stream?.game) {
-            const game = useViewCount.user.stream.game;
-            if (!metadata.game_id && game.id) metadata.game_id = game.id;
-            if (!metadata.game_name && game.name) metadata.game_name = game.name;
+        if (useViewCount?.user) {
+            if (useViewCount.user.id) metadata.user_id = useViewCount.user.id;
+            if (useViewCount.user.login) metadata.user_login = useViewCount.user.login;
+            if (useViewCount.user.stream) {
+                if (useViewCount.user.stream.id) metadata.video_id = useViewCount.user.stream.id;
+                if (useViewCount.user.stream.viewersCount !== undefined) metadata.viewer_count = useViewCount.user.stream.viewersCount;
+                if (useViewCount.user.stream.game) {
+                    if (!metadata.game_id && useViewCount.user.stream.game.id) metadata.game_id = useViewCount.user.stream.game.id;
+                    if (!metadata.game_name && useViewCount.user.stream.game.name) metadata.game_name = useViewCount.user.stream.game.name;
+                }
+            }
+        }
+
+        // VideoMetadata - stream title and basic info
+        if (videoMetadata?.user) {
+            if (!metadata.user_id && videoMetadata.user.id) metadata.user_id = videoMetadata.user.id;
+            if (!metadata.user_login && videoMetadata.user.login) metadata.user_login = videoMetadata.user.login;
+            if (videoMetadata.user.stream) {
+                if (!metadata.video_id && videoMetadata.user.stream.id) metadata.video_id = videoMetadata.user.stream.id;
+                if (metadata.viewer_count === undefined && videoMetadata.user.stream.viewersCount !== undefined) {
+                    metadata.viewer_count = videoMetadata.user.stream.viewersCount;
+                }
+            }
+            if (videoMetadata.user.lastBroadcast) {
+                if (videoMetadata.user.lastBroadcast.startedAt) metadata.started_at = videoMetadata.user.lastBroadcast.startedAt;
+            }
+        }
+
+        // ChannelShell - stream title and broadcaster info
+        if (channelShell?.userOrError) {
+            if (!metadata.user_id && channelShell.userOrError.id) metadata.user_id = channelShell.userOrError.id;
+            if (!metadata.user_login && channelShell.userOrError.login) metadata.user_login = channelShell.userOrError.login;
+            if (!metadata.user_name && channelShell.userOrError.displayName) metadata.user_name = channelShell.userOrError.displayName;
+            if (channelShell.userOrError.broadcastSettings?.title) metadata.title = channelShell.userOrError.broadcastSettings.title;
         }
 
         // StreamMetadata - another source for stream info

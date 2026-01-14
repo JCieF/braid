@@ -36,24 +36,29 @@ async function testTikTok() {
 
             if (creator) {
                 console.log("\n[CREATOR METADATA]");
-                console.log("Username:", creator.creator_username || "N/A");
-                console.log("Name:", creator.creator_name || "N/A");
-                console.log("Avatar URL:", creator.creator_avatar_url || "N/A");
-                console.log("Bio:", creator.creator_bio || "N/A");
-                console.log("Followers:", creator.creator_follower_count || "N/A");
-                console.log("Verified:", creator.creator_verified ?? "N/A");
+                console.log("Username:", creator.creator_username || "false");
+                console.log("Name:", creator.creator_name || "false");
+                console.log("Avatar URL:", creator.creator_avatar_url || "false");
+                console.log("Bio:", creator.creator_bio || "false");
+                console.log("Followers:", creator.creator_follower_count || "false");
+                console.log("Verified:", creator.creator_verified === true ? "true" : "false");
             }
 
             if (video) {
                 console.log("\n[VIDEO METADATA]");
                 console.log("Video ID:", video.video_id || "N/A");
                 console.log("Embed Link:", video.embed_link || "N/A");
-                console.log("Hashtags:", video.hashtags ? video.hashtags.join(", ") : "N/A");
-                console.log("Effect IDs:", video.effect_ids ? video.effect_ids.join(", ") : "N/A");
-                console.log("Music ID:", video.music_id || "N/A");
-                console.log("Playlist ID:", video.playlist_id || "N/A");
-                console.log("Voice to Text:", video.voice_to_text || "N/A");
-                console.log("Region Code:", video.region_code || "N/A");
+                console.log("Hashtags:", video.hashtags && Array.isArray(video.hashtags) && video.hashtags.length > 0 ? video.hashtags.join(", ") : "false");
+                const effectIdsDisplay = video.effect_ids 
+                    ? (Array.isArray(video.effect_ids) && video.effect_ids.length > 0 
+                        ? video.effect_ids.join(", ") 
+                        : String(video.effect_ids))
+                    : "false";
+                console.log("Effect IDs:", effectIdsDisplay);
+                console.log("Music ID:", video.music_id || "false");
+                console.log("Playlist ID:", video.playlist_id || "false");
+                console.log("Voice to Text:", video.voice_to_text || "false");
+                console.log("Region Code:", video.region_code || "false");
             }
 
             console.log("\n=== TikTok Test: SUCCESS ===");
