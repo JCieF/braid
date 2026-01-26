@@ -297,7 +297,7 @@ var CreatorMetadataManager = /** @class */ (function () {
     };
     CreatorMetadataManager.prototype.extractExtendedMetadataFromPage = function (page, videoUrl) {
         return __awaiter(this, void 0, void 0, function () {
-            var logAgent, platform, scraper, creatorMetadata, videoMetadata, result, error_8;
+            var logAgent, platform, scraper, creatorMetadata, videoMetadata, result, creatorFields, error_8;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -326,6 +326,25 @@ var CreatorMetadataManager = /** @class */ (function () {
                             result.creator = creatorMetadata;
                         if (videoMetadata)
                             result.video = videoMetadata;
+                        if (creatorMetadata && videoMetadata && videoMetadata.creator_fields) {
+                            creatorFields = videoMetadata.creator_fields;
+                            if (creatorFields.creator_open_id)
+                                creatorMetadata.creator_open_id = creatorFields.creator_open_id;
+                            if (creatorFields.creator_union_id)
+                                creatorMetadata.creator_union_id = creatorFields.creator_union_id;
+                            if (creatorFields.creator_avatar_url_100)
+                                creatorMetadata.creator_avatar_url_100 = creatorFields.creator_avatar_url_100;
+                            if (creatorFields.creator_avatar_large_url)
+                                creatorMetadata.creator_avatar_large_url = creatorFields.creator_avatar_large_url;
+                            if (creatorFields.creator_profile_deep_link)
+                                creatorMetadata.creator_profile_deep_link = creatorFields.creator_profile_deep_link;
+                            if (creatorFields.creator_following_count !== undefined)
+                                creatorMetadata.creator_following_count = creatorFields.creator_following_count;
+                            if (creatorFields.creator_likes_count !== undefined)
+                                creatorMetadata.creator_likes_count = creatorFields.creator_likes_count;
+                            if (creatorFields.creator_video_count !== undefined)
+                                creatorMetadata.creator_video_count = creatorFields.creator_video_count;
+                        }
                         return [2 /*return*/, Object.keys(result).length > 0 ? result : null];
                     case 4:
                         error_8 = _a.sent();

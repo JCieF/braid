@@ -13,7 +13,7 @@ export class ChromiumBrowser {
 
     async launch(config: BrowserConfig = {}): Promise<void> {
         try {
-            this.browser = await chromium.launch({
+            const launchOptions: any = {
                 headless: config.headless ?? true,
                 args: [
                     "--no-sandbox",
@@ -31,7 +31,13 @@ export class ChromiumBrowser {
                     "--log-level=0",
                     "--enable-network-service-logging",
                 ],
-            });
+            };
+
+            if (config.userDataDir) {
+                launchOptions.userDataDir = config.userDataDir;
+            }
+
+            this.browser = await chromium.launch(launchOptions);
 
             this.context = await this.browser.newContext({
                 viewport: config.viewport ?? { width: 1920, height: 1080 },

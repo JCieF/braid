@@ -26,9 +26,6 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 return null;
             }
 
-            await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
-            await this.delay(3000);
-
             const metadata: CreatorMetadata = {
                 platform: "tiktok",
                 url: profileUrl,
@@ -38,7 +35,11 @@ export class TikTokScraper extends CreatorMetadataScraper {
             const usernameMatch = profileUrl.match(/@([^\/\?]+)/);
             if (usernameMatch) {
                 metadata.creator_username = usernameMatch[1];
+                metadata.creator_profile_deep_link = profileUrl;
             }
+            
+            await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
+            await this.delay(3000);
 
             const nameSelectors = [
                 '[data-e2e="user-title"]',
@@ -95,6 +96,18 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 const avatar = await this.getElementAttribute(page, selector, "src");
                 if (avatar) {
                     metadata.creator_avatar_url = avatar;
+                    
+                    if (avatar.includes("tiktokcdn.com")) {
+                        const avatar100 = avatar.replace(/~tplv-[^:]+:[^:]+:[^:]+/, "~tplv-tiktokx-cropcenter:100:100");
+                        if (avatar100 !== avatar) {
+                            metadata.creator_avatar_url_100 = avatar100;
+                        }
+                        
+                        const avatarLarge = avatar.replace(/~tplv-[^:]+:[^:]+:[^:]+/, "~tplv-tiktokx-cropcenter:720:720");
+                        if (avatarLarge !== avatar) {
+                            metadata.creator_avatar_large_url = avatarLarge;
+                        }
+                    }
                     break;
                 }
             }
@@ -155,7 +168,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
 
     async extractVideoMetadata(page: Page, videoUrl: string): Promise<VideoMetadata | null> {
         try {
-            this.logger.log("Extracting TikTok video metadata (yt-dlp gaps only)...", "info");
+            this.logger.log("Extracting TikTok video metadata...", "info");
 
             const apiResponses: any[] = [];
             const allApiResponses: any[] = [];
@@ -254,6 +267,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
             if (embeddedData) {
                 this.logger.log(`Extracted ${Object.keys(embeddedData).length} fields from embedded data`, "debug");
                 this.logger.log(`Embedded data keys: ${Object.keys(embeddedData).join(", ")}`, "debug");
+                
                 if (embeddedData.embed_link) metadata.embed_link = embeddedData.embed_link;
                 if (embeddedData.hashtags) {
                     metadata.hashtags = embeddedData.hashtags;
@@ -267,6 +281,25 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 if (embeddedData.voice_to_text) metadata.voice_to_text = embeddedData.voice_to_text;
                 if (embeddedData.region_code) metadata.region_code = embeddedData.region_code;
                 if (embeddedData.music_id) metadata.music_id = embeddedData.music_id;
+                
+                if (embeddedData.caption) metadata.caption = embeddedData.caption;
+                if (embeddedData.timestamp !== undefined) metadata.timestamp = embeddedData.timestamp;
+                if (embeddedData.like_count !== undefined) metadata.like_count = embeddedData.like_count;
+                if (embeddedData.comment_count !== undefined) metadata.comment_count = embeddedData.comment_count;
+                if (embeddedData.view_count !== undefined) metadata.view_count = embeddedData.view_count;
+                if (embeddedData.play_count !== undefined) metadata.play_count = embeddedData.play_count;
+                if (embeddedData.share_count !== undefined) metadata.share_count = embeddedData.share_count;
+                if (embeddedData.duration !== undefined) metadata.duration = embeddedData.duration;
+                if (embeddedData.music_title) metadata.music_title = embeddedData.music_title;
+                if (embeddedData.music_artist) metadata.music_artist = embeddedData.music_artist;
+                if (embeddedData.mentions) metadata.mentions = embeddedData.mentions;
+                if (embeddedData.thumbnails) metadata.thumbnails = embeddedData.thumbnails;
+                if (embeddedData.save_count !== undefined) metadata.save_count = embeddedData.save_count;
+                if (embeddedData.location) metadata.location = embeddedData.location;
+                if (embeddedData.location_latitude !== undefined) metadata.location_latitude = embeddedData.location_latitude;
+                if (embeddedData.location_longitude !== undefined) metadata.location_longitude = embeddedData.location_longitude;
+                if (embeddedData.is_video !== undefined) metadata.is_video = embeddedData.is_video;
+                if (embeddedData.dimension) metadata.dimension = embeddedData.dimension;
             } else {
                 this.logger.log("No embedded data found", "debug");
             }
@@ -302,6 +335,21 @@ export class TikTokScraper extends CreatorMetadataScraper {
             }
             if (metadata.hashtags) {
                 this.logger.log(`Final hashtags: ${Array.isArray(metadata.hashtags) ? metadata.hashtags.join(", ") : metadata.hashtags}`, "info");
+            }
+            
+            const creatorFields: any = {};
+            if ((embeddedData as any)?.creator_open_id) creatorFields.creator_open_id = (embeddedData as any).creator_open_id;
+            if ((embeddedData as any)?.creator_union_id) creatorFields.creator_union_id = (embeddedData as any).creator_union_id;
+            if ((embeddedData as any)?.creator_avatar_url_100) creatorFields.creator_avatar_url_100 = (embeddedData as any).creator_avatar_url_100;
+            if ((embeddedData as any)?.creator_avatar_large_url) creatorFields.creator_avatar_large_url = (embeddedData as any).creator_avatar_large_url;
+            if ((embeddedData as any)?.creator_profile_deep_link) creatorFields.creator_profile_deep_link = (embeddedData as any).creator_profile_deep_link;
+            if ((embeddedData as any)?.creator_following_count !== undefined) creatorFields.creator_following_count = (embeddedData as any).creator_following_count;
+            if ((embeddedData as any)?.creator_likes_count !== undefined) creatorFields.creator_likes_count = (embeddedData as any).creator_likes_count;
+            if ((embeddedData as any)?.creator_video_count !== undefined) creatorFields.creator_video_count = (embeddedData as any).creator_video_count;
+            
+            if (Object.keys(creatorFields).length > 0) {
+                (metadata as any).creator_fields = creatorFields;
+                this.logger.log(`Extracted ${Object.keys(creatorFields).length} creator fields from video API`, "info");
             }
 
             this.logger.log("Successfully extracted TikTok video metadata", "info");
@@ -727,6 +775,91 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             this.logger.log(`${source} challengeList type: ${Array.isArray(videoData.challengeList) ? 'array' : typeof videoData.challengeList}, length: ${Array.isArray(videoData.challengeList) ? videoData.challengeList.length : 'N/A'}`, "debug");
                         }
                         
+                        if (!response.data.caption && videoData.desc) {
+                            response.data.caption = String(videoData.desc);
+                            this.logger.log(`Extracted caption from ${source} (${response.data.caption.length} chars)`, "info");
+                        }
+                        
+                        if (!response.data.timestamp && videoData.createTime) {
+                            const createTime = typeof videoData.createTime === 'number' ? videoData.createTime : parseInt(String(videoData.createTime));
+                            if (!isNaN(createTime)) {
+                                response.data.timestamp = createTime;
+                                this.logger.log(`Extracted timestamp from ${source}: ${createTime}`, "info");
+                            }
+                        }
+                        
+                        if (videoData.stats) {
+                            if (!response.data.like_count && (videoData.stats.diggCount !== undefined || videoData.stats.likeCount !== undefined)) {
+                                response.data.like_count = videoData.stats.diggCount || videoData.stats.likeCount || 0;
+                                this.logger.log(`Extracted like_count from ${source}: ${response.data.like_count}`, "info");
+                            }
+                            
+                            if (!response.data.comment_count && videoData.stats.commentCount !== undefined) {
+                                response.data.comment_count = videoData.stats.commentCount || 0;
+                                this.logger.log(`Extracted comment_count from ${source}: ${response.data.comment_count}`, "info");
+                            }
+                            
+                            if (!response.data.view_count && (videoData.stats.playCount !== undefined || videoData.stats.viewCount !== undefined)) {
+                                response.data.view_count = videoData.stats.playCount || videoData.stats.viewCount || 0;
+                                this.logger.log(`Extracted view_count from ${source}: ${response.data.view_count}`, "info");
+                            }
+                            
+                            if (!response.data.play_count && videoData.stats.playCount !== undefined) {
+                                response.data.play_count = videoData.stats.playCount || 0;
+                                this.logger.log(`Extracted play_count from ${source}: ${response.data.play_count}`, "info");
+                            }
+                            
+                            if (!response.data.share_count && videoData.stats.shareCount !== undefined) {
+                                response.data.share_count = videoData.stats.shareCount || 0;
+                                this.logger.log(`Extracted share_count from ${source}: ${response.data.share_count}`, "info");
+                            }
+                        }
+                        
+                        if (videoData.statsV2) {
+                            if (!response.data.like_count && (videoData.statsV2.diggCount !== undefined || videoData.statsV2.likeCount !== undefined)) {
+                                response.data.like_count = videoData.statsV2.diggCount || videoData.statsV2.likeCount || 0;
+                                this.logger.log(`Extracted like_count from ${source} statsV2: ${response.data.like_count}`, "info");
+                            }
+                            
+                            if (!response.data.comment_count && videoData.statsV2.commentCount !== undefined) {
+                                response.data.comment_count = videoData.statsV2.commentCount || 0;
+                                this.logger.log(`Extracted comment_count from ${source} statsV2: ${response.data.comment_count}`, "info");
+                            }
+                            
+                            if (!response.data.view_count && (videoData.statsV2.playCount !== undefined || videoData.statsV2.viewCount !== undefined)) {
+                                response.data.view_count = videoData.statsV2.playCount || videoData.statsV2.viewCount || 0;
+                                this.logger.log(`Extracted view_count from ${source} statsV2: ${response.data.view_count}`, "info");
+                            }
+                            
+                            if (!response.data.share_count && videoData.statsV2.shareCount !== undefined) {
+                                response.data.share_count = videoData.statsV2.shareCount || 0;
+                                this.logger.log(`Extracted share_count from ${source} statsV2: ${response.data.share_count}`, "info");
+                            }
+                        }
+                        
+                        if (!response.data.duration && videoData.video?.duration) {
+                            const duration = typeof videoData.video.duration === 'number' ? videoData.video.duration : parseInt(String(videoData.video.duration));
+                            if (!isNaN(duration) && duration > 0) {
+                                response.data.duration = duration;
+                                this.logger.log(`Extracted duration from ${source}: ${duration}s`, "info");
+                            }
+                        }
+                        
+                        if (!response.data.music_title && videoData.music?.title) {
+                            response.data.music_title = String(videoData.music.title);
+                            this.logger.log(`Extracted music_title from ${source}: ${response.data.music_title}`, "info");
+                        }
+                        
+                        if (!response.data.music_artist && videoData.music?.authorName) {
+                            response.data.music_artist = String(videoData.music.authorName);
+                            this.logger.log(`Extracted music_artist from ${source}: ${response.data.music_artist}`, "info");
+                        }
+                        
+                        if (!response.data.music_artist && videoData.music?.author) {
+                            response.data.music_artist = String(videoData.music.author);
+                            this.logger.log(`Extracted music_artist from ${source} (author): ${response.data.music_artist}`, "info");
+                        }
+                        
                         if (!response.data.hashtags && videoData.desc) {
                             const descText = String(videoData.desc);
                             const hashtags = (descText.match(/#[\w\u4e00-\u9fff]+/g) || []).map((h: string) => h.substring(1));
@@ -864,6 +997,130 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             if (subtitles) {
                                 response.data.voice_to_text = subtitles;
                                 this.logger.log(`Extracted voice_to_text from ${source} subtitleInfos (${subtitles.length} chars)`, "info");
+                            }
+                        }
+                        
+                        if (videoData.textExtra && Array.isArray(videoData.textExtra)) {
+                            const mentions = videoData.textExtra
+                                .filter((item: any) => item.userUniqueId || item.userId || item.userUniqueId || item.type === 'user')
+                                .map((item: any) => item.userUniqueId || item.userId || item.userName || item.nickname)
+                                .filter(Boolean);
+                            if (mentions.length > 0 && !response.data.mentions) {
+                                response.data.mentions = mentions;
+                                this.logger.log(`Extracted mentions from ${source}: ${mentions.join(", ")}`, "info");
+                            }
+                        }
+                        
+                        if (videoData.video) {
+                            if (!response.data.is_video && videoData.video.duration !== undefined) {
+                                response.data.is_video = true;
+                                this.logger.log(`Extracted is_video from ${source}: true`, "info");
+                            }
+                            
+                            const thumbnails: string[] = [];
+                            if (videoData.video.cover) thumbnails.push(String(videoData.video.cover));
+                            if (videoData.video.dynamicCover) thumbnails.push(String(videoData.video.dynamicCover));
+                            if (videoData.video.originCover) thumbnails.push(String(videoData.video.originCover));
+                            if (thumbnails.length > 0 && !response.data.thumbnails) {
+                                response.data.thumbnails = thumbnails;
+                                this.logger.log(`Extracted ${thumbnails.length} thumbnail(s) from ${source}`, "info");
+                            }
+                            
+                            if (videoData.video.width && !response.data.dimension) {
+                                const width = typeof videoData.video.width === 'number' ? videoData.video.width : parseInt(String(videoData.video.width));
+                                const height = videoData.video.height ? (typeof videoData.video.height === 'number' ? videoData.video.height : parseInt(String(videoData.video.height))) : null;
+                                if (!isNaN(width)) {
+                                    response.data.dimension = height && !isNaN(height) ? `${width}x${height}` : `${width}`;
+                                    this.logger.log(`Extracted dimension from ${source}: ${response.data.dimension}`, "info");
+                                }
+                            }
+                        }
+                        
+                        if (!response.data.caption && videoData.title) {
+                            response.data.caption = String(videoData.title);
+                            this.logger.log(`Extracted title as caption from ${source}`, "info");
+                        }
+                        
+                        if (videoData.collected !== undefined && !response.data.save_count) {
+                            response.data.save_count = videoData.collected ? 1 : 0;
+                            this.logger.log(`Extracted save_count (collected) from ${source}: ${response.data.save_count}`, "info");
+                        }
+                        
+                        if (videoData.author) {
+                            if (videoData.author.openId && !(response.data as any).creator_open_id) {
+                                (response.data as any).creator_open_id = String(videoData.author.openId);
+                                this.logger.log(`Extracted creator_open_id from ${source}: ${(response.data as any).creator_open_id}`, "info");
+                            }
+                            
+                            if (videoData.author.unionId && !(response.data as any).creator_union_id) {
+                                (response.data as any).creator_union_id = String(videoData.author.unionId);
+                                this.logger.log(`Extracted creator_union_id from ${source}: ${(response.data as any).creator_union_id}`, "info");
+                            }
+                            
+                            if (videoData.author.avatarThumb && !(response.data as any).creator_avatar_url_100) {
+                                (response.data as any).creator_avatar_url_100 = String(videoData.author.avatarThumb);
+                                this.logger.log(`Extracted creator_avatar_url_100 from ${source}`, "info");
+                            }
+                            
+                            if (videoData.author.avatarMedium && !(response.data as any).creator_avatar_large_url) {
+                                (response.data as any).creator_avatar_large_url = String(videoData.author.avatarMedium);
+                                this.logger.log(`Extracted creator_avatar_large_url from ${source}`, "info");
+                            }
+                            
+                            if (videoData.author.avatarLarger && !(response.data as any).creator_avatar_large_url) {
+                                (response.data as any).creator_avatar_large_url = String(videoData.author.avatarLarger);
+                                this.logger.log(`Extracted creator_avatar_large_url from ${source} (avatarLarger)`, "info");
+                            }
+                            
+                            if (videoData.author.uniqueId && !(response.data as any).creator_profile_deep_link) {
+                                (response.data as any).creator_profile_deep_link = `https://www.tiktok.com/@${videoData.author.uniqueId}`;
+                                this.logger.log(`Extracted creator_profile_deep_link from ${source}: ${(response.data as any).creator_profile_deep_link}`, "info");
+                            }
+                            
+                            if (videoData.authorStats) {
+                                if (videoData.authorStats.followingCount !== undefined && !(response.data as any).creator_following_count) {
+                                    (response.data as any).creator_following_count = videoData.authorStats.followingCount;
+                                    this.logger.log(`Extracted creator_following_count from ${source}: ${(response.data as any).creator_following_count}`, "info");
+                                }
+                                if (videoData.authorStats.heartCount !== undefined && !(response.data as any).creator_likes_count) {
+                                    (response.data as any).creator_likes_count = videoData.authorStats.heartCount;
+                                    this.logger.log(`Extracted creator_likes_count from ${source}: ${(response.data as any).creator_likes_count}`, "info");
+                                }
+                                if (videoData.authorStats.videoCount !== undefined && !(response.data as any).creator_video_count) {
+                                    (response.data as any).creator_video_count = videoData.authorStats.videoCount;
+                                    this.logger.log(`Extracted creator_video_count from ${source}: ${(response.data as any).creator_video_count}`, "info");
+                                }
+                            }
+                            
+                            if (videoData.authorStatsV2) {
+                                if (videoData.authorStatsV2.followingCount !== undefined && !(response.data as any).creator_following_count) {
+                                    (response.data as any).creator_following_count = videoData.authorStatsV2.followingCount;
+                                    this.logger.log(`Extracted creator_following_count from ${source} (V2): ${(response.data as any).creator_following_count}`, "info");
+                                }
+                                if (videoData.authorStatsV2.heartCount !== undefined && !(response.data as any).creator_likes_count) {
+                                    (response.data as any).creator_likes_count = videoData.authorStatsV2.heartCount;
+                                    this.logger.log(`Extracted creator_likes_count from ${source} (V2): ${(response.data as any).creator_likes_count}`, "info");
+                                }
+                                if (videoData.authorStatsV2.videoCount !== undefined && !(response.data as any).creator_video_count) {
+                                    (response.data as any).creator_video_count = videoData.authorStatsV2.videoCount;
+                                    this.logger.log(`Extracted creator_video_count from ${source} (V2): ${(response.data as any).creator_video_count}`, "info");
+                                }
+                            }
+                        }
+                        
+                        if (videoData.locationInfo || videoData.location) {
+                            const location = videoData.locationInfo || videoData.location;
+                            if (location && !response.data.location) {
+                                response.data.location = location.name || location.address || location.locationName || String(location);
+                                this.logger.log(`Extracted location from ${source}: ${response.data.location}`, "info");
+                            }
+                            if (location?.latitude && !response.data.location_latitude) {
+                                response.data.location_latitude = typeof location.latitude === 'number' ? location.latitude : parseFloat(String(location.latitude));
+                                this.logger.log(`Extracted location_latitude from ${source}: ${response.data.location_latitude}`, "info");
+                            }
+                            if (location?.longitude && !response.data.location_longitude) {
+                                response.data.location_longitude = typeof location.longitude === 'number' ? location.longitude : parseFloat(String(location.longitude));
+                                this.logger.log(`Extracted location_longitude from ${source}: ${response.data.location_longitude}`, "info");
                             }
                         }
                     };

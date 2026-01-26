@@ -238,6 +238,18 @@ export class CreatorMetadataManager {
             const result: ExtendedMetadata = {};
             if (creatorMetadata) result.creator = creatorMetadata;
             if (videoMetadata) result.video = videoMetadata;
+            
+            if (creatorMetadata && videoMetadata && (videoMetadata as any).creator_fields) {
+                const creatorFields = (videoMetadata as any).creator_fields;
+                if (creatorFields.creator_open_id) creatorMetadata.creator_open_id = creatorFields.creator_open_id;
+                if (creatorFields.creator_union_id) creatorMetadata.creator_union_id = creatorFields.creator_union_id;
+                if (creatorFields.creator_avatar_url_100) creatorMetadata.creator_avatar_url_100 = creatorFields.creator_avatar_url_100;
+                if (creatorFields.creator_avatar_large_url) creatorMetadata.creator_avatar_large_url = creatorFields.creator_avatar_large_url;
+                if (creatorFields.creator_profile_deep_link) creatorMetadata.creator_profile_deep_link = creatorFields.creator_profile_deep_link;
+                if (creatorFields.creator_following_count !== undefined) creatorMetadata.creator_following_count = creatorFields.creator_following_count;
+                if (creatorFields.creator_likes_count !== undefined) creatorMetadata.creator_likes_count = creatorFields.creator_likes_count;
+                if (creatorFields.creator_video_count !== undefined) creatorMetadata.creator_video_count = creatorFields.creator_video_count;
+            }
 
             return Object.keys(result).length > 0 ? result : null;
 

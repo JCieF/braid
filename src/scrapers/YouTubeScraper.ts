@@ -86,32 +86,46 @@ export class YouTubeScraper extends CreatorMetadataScraper {
         try {
             this.logger.log("Extracting YouTube video metadata (all fields for fallback)...", "info");
 
-            await page.goto(videoUrl, { waitUntil: "networkidle" });
+            const isShortUrl = videoUrl.includes("/shorts/");
+
+            // Shorts pages often keep background network activity going, which can cause
+            // `waitUntil: "networkidle"` to time out. Use a less strict load state.
+            await page.goto(videoUrl, { waitUntil: isShortUrl ? "domcontentloaded" : "networkidle" });
             await this.delay(3000);
             
             // Wait for engagement metrics to load (like/comment counts)
+            // Shorts pages have different structure, so use different selectors
             try {
-                await page.waitForSelector('ytd-video-primary-info-renderer, #top-level-buttons-computed', { timeout: 5000 });
+                if (isShortUrl) {
+                    // For Shorts, wait for Shorts-specific elements or just wait for data
+                    await page.waitForFunction(() => {
+                        return !!(window as any).ytInitialPlayerResponse || !!(window as any).ytInitialData;
+                    }, { timeout: 10000 });
+                } else {
+                    // For regular videos, wait for the standard selectors
+                    await page.waitForSelector('ytd-video-primary-info-renderer, #top-level-buttons-computed', { timeout: 5000 });
+                }
             } catch {
-                // Continue if not found
+                // Continue if not found - data might still be available
             }
             await this.delay(2000);
             
-            // Scroll to comments section to trigger loading
-            try {
-                await page.evaluate(() => {
-                    const commentsSection = document.querySelector('ytd-comments-header-renderer, #comments');
-                    if (commentsSection) {
-                        commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                });
-                await this.delay(2000);
-            } catch {
-                // Continue if scroll fails
+            // Scroll to comments section to trigger loading (only for regular videos)
+            if (!isShortUrl) {
+                try {
+                    await page.evaluate(() => {
+                        const commentsSection = document.querySelector('ytd-comments-header-renderer, #comments');
+                        if (commentsSection) {
+                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    });
+                    await this.delay(2000);
+                } catch {
+                    // Continue if scroll fails
+                }
             }
 
             const videoIdMatch = videoUrl.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/);
-            const isShortUrl = videoUrl.includes("/shorts/");
 
             const metadata: VideoMetadata = {
                 platform: "youtube",
@@ -124,7 +138,11 @@ export class YouTubeScraper extends CreatorMetadataScraper {
             }
 
             // Extract data from YouTube's embedded JSON
-            const embeddedData = await this.extractYouTubeSpecificData(page);
+            const embeddedData = await this.extractYouTubeSpecificData(page, videoUrl);
+            
+            if (!embeddedData) {
+                this.logger.log("Warning: extractYouTubeSpecificData returned null - data may not be available", "warn");
+            }
             
             // Fallback: Try DOM extraction for like_count and comment_count if JSON extraction failed
             if (embeddedData) {
@@ -277,6 +295,36 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                     }
                 }
 
+                // Shorts/pages without a classic comments header often expose the count only in aria-labels.
+                // Example patterns vary, so scan aria-labels as a last resort.
+                if (!result.comment_count) {
+                    try {
+                        const ariaCandidates = document.querySelectorAll('[aria-label]');
+                        for (const el of ariaCandidates) {
+                            const ariaLabel = (el.getAttribute('aria-label') || '').trim();
+                            const lower = ariaLabel.toLowerCase();
+                            if (!ariaLabel || !lower.includes('comment')) continue;
+                            if (!/[\d.,]+[KMB]?/.test(ariaLabel)) continue;
+
+                            const match = ariaLabel.match(/([\d.,]+[KMB]?)/);
+                            if (!match) continue;
+
+                            let num = parseFloat(match[1].replace(/,/g, ''));
+                            const matchText = match[1];
+                            if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                            else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                            else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+
+                            if (num > 0 && num < 100000000) {
+                                result.comment_count = Math.floor(num);
+                                break;
+                            }
+                        }
+                    } catch (e) {
+                        // ignore
+                    }
+                }
+
                 return result;
             });
 
@@ -399,7 +447,7 @@ export class YouTubeScraper extends CreatorMetadataScraper {
         }
     }
 
-    private async extractYouTubeSpecificData(page: Page): Promise<{
+    private async extractYouTubeSpecificData(page: Page, videoUrl?: string): Promise<{
         //fields that yt-dlp can get but i added here for completeness
         title?: string;
         description?: string;
@@ -440,7 +488,7 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                 await this.delay(3000);
             }
             
-            const data = await page.evaluate(() => {
+            const data = await page.evaluate((videoUrl) => {
                 const result: any = {};
 
                 // Extract from ytInitialPlayerResponse
@@ -547,16 +595,26 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                             result.description = videoDetails.shortDescription;
                         }
                         if (videoDetails.viewCount) {
-                            const viewCountStr = String(videoDetails.viewCount);
-                            // Handle formatted numbers like "1,503,533,943" or "1.5B"
-                            if (viewCountStr.includes(',') || viewCountStr.includes('.')) {
-                                let num = parseFloat(viewCountStr.replace(/,/g, ''));
-                                if (viewCountStr.includes('K') || viewCountStr.includes('k')) num *= 1000;
-                                else if (viewCountStr.includes('M') || viewCountStr.includes('m')) num *= 1000000;
-                                else if (viewCountStr.includes('B') || viewCountStr.includes('b')) num *= 1000000000;
-                                result.view_count = Math.floor(num);
+                            // Handle both number and string formats
+                            if (typeof videoDetails.viewCount === 'number') {
+                                result.view_count = videoDetails.viewCount;
                             } else {
-                                result.view_count = parseInt(viewCountStr) || 0;
+                                const viewCountStr = String(videoDetails.viewCount);
+                                // Handle formatted numbers like "1,503,533,943" or "1.5B"
+                                if (viewCountStr.includes(',') || viewCountStr.includes('.')) {
+                                    let num = parseFloat(viewCountStr.replace(/,/g, ''));
+                                    if (viewCountStr.includes('K') || viewCountStr.includes('k')) num *= 1000;
+                                    else if (viewCountStr.includes('M') || viewCountStr.includes('m')) num *= 1000000;
+                                    else if (viewCountStr.includes('B') || viewCountStr.includes('b')) num *= 1000000000;
+                                    if (num > 0 && num < 10000000000) {
+                                        result.view_count = Math.floor(num);
+                                    }
+                                } else {
+                                    const parsed = parseInt(viewCountStr);
+                                    if (parsed > 0 && parsed < 10000000000) {
+                                        result.view_count = parsed;
+                                    }
+                                }
                             }
                         }
                         if (videoDetails.lengthSeconds) {
@@ -581,6 +639,15 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                     if (microformat) {
                         if (microformat.category) {
                             result.category = microformat.category;
+                        }
+                        // Some pages (including some Shorts) don't include videoDetails.viewCount,
+                        // but do include microformat.viewCount.
+                        if (!result.view_count && microformat.viewCount) {
+                            const viewCountStr = String(microformat.viewCount);
+                            const parsed = parseInt(viewCountStr.replace(/[^\d]/g, ""));
+                            if (parsed > 0 && parsed < 10000000000) {
+                                result.view_count = parsed;
+                            }
                         }
                         // Priority 1: defaultAudioLanguage (most reliable - actual video audio language)
                         if (microformat.defaultAudioLanguage) {
@@ -679,6 +746,19 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                     result.hasCaptions = captions && captions.length > 0;
                 }
 
+                // Fallback: If tags/keywords aren't present, derive "tags" from hashtags in title/description.
+                // This helps Shorts where videoDetails.keywords is often missing.
+                if (!result.tags) {
+                    const text = `${result.title || ""}\n${result.description || ""}`;
+                    const hashtagMatches = text.match(/#[A-Za-z0-9_]+/g) || [];
+                    if (hashtagMatches.length > 0) {
+                        const unique = Array.from(new Set(hashtagMatches.map((h: string) => h.replace(/^#/, ""))));
+                        if (unique.length > 0) {
+                            result.tags = unique;
+                        }
+                    }
+                }
+
                 // Extract from ytInitialData
                 if ((window as any).ytInitialData) {
                     const ytData = (window as any).ytInitialData;
@@ -693,16 +773,14 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                         
                         // Check 2: Comments section - kids videos have comments disabled
                         const contents = ytData?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+                        let hasCommentsSection = false;
                         if (contents) {
-                            let hasCommentsSection = false;
                             for (const content of contents) {
                                 if (content?.itemSectionRenderer?.sectionIdentifier === 'comment-item-section') {
                                     hasCommentsSection = true;
                                     break;
                                 }
                             }
-                            // If no comments section at all, might be kids content
-                            // But we need more evidence, so just use as supporting info
                         }
                         
                         // Check 3: Badge labels
@@ -717,14 +795,66 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                             }
                         }
                         
-                        // Check 4: Look for "Made for kids" text in page
-                        const pageText = document.body?.innerText || '';
-                        if (pageText.includes('Made for kids') || pageText.includes('Made for Kids')) {
+                        // Check 4: Look for kids-related text in page (multiple indicators)
+                        const pageText = (document.body?.innerText || '').toLowerCase();
+                        const pageHTML = (document.body?.innerHTML || '').toLowerCase();
+                        const combinedText = pageText + ' ' + pageHTML;
+                        
+                        // Check for various kids content indicators
+                        const kidsIndicators = [
+                            'made for kids',
+                            'youtube kids',
+                            'try youtube kids',
+                            'app made just for kids',
+                            'comments are turned off',
+                            'comments are disabled'
+                        ];
+                        
+                        let foundKidsIndicator = false;
+                        for (const indicator of kidsIndicators) {
+                            if (combinedText.includes(indicator.toLowerCase())) {
+                                foundKidsIndicator = true;
+                                break;
+                            }
+                        }
+                        
+                        if (foundKidsIndicator) {
                             result.madeForKids = true;
                         }
                         
-                        // Check 5: ytcfg config
-                        if ((window as any).ytcfg) {
+                        // Check 5: Comments disabled + channel name patterns (strong indicator)
+                        if (result.madeForKids === undefined && !hasCommentsSection) {
+                            // Get channel name from result or try to extract from ytInitialData
+                            let channelName = result.channel_name?.toLowerCase() || '';
+                            if (!channelName) {
+                                // Try to get from ytInitialData
+                                const channelInfo = contents?.[0]?.videoPrimaryInfoRenderer?.owner?.videoOwnerRenderer?.title?.runs?.[0]?.text ||
+                                                   contents?.[0]?.videoPrimaryInfoRenderer?.owner?.videoOwnerRenderer?.title?.simpleText;
+                                if (channelInfo) {
+                                    channelName = channelInfo.toLowerCase();
+                                }
+                            }
+                            
+                            const kidsChannelPatterns = [
+                                'nursery rhymes',
+                                'kids songs',
+                                'children',
+                                'cocomelon',
+                                'pinkfong',
+                                'little baby bum',
+                                'super simple songs'
+                            ];
+                            
+                            for (const pattern of kidsChannelPatterns) {
+                                if (channelName.includes(pattern)) {
+                                    result.madeForKids = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Check 6: ytcfg config
+                        if (result.madeForKids === undefined && (window as any).ytcfg) {
                             const ytcfg = (window as any).ytcfg;
                             const data = ytcfg.data_ || ytcfg.d?.() || {};
                             if (data.PLAYER_VARS?.madeForKids !== undefined) {
@@ -732,7 +862,7 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                             }
                         }
                         
-                        // Check 6: If still undefined, default to false (most videos are not for kids)
+                        // Check 7: If still undefined, default to false (most videos are not for kids)
                         if (result.madeForKids === undefined) {
                             result.madeForKids = false;
                         }
@@ -960,9 +1090,230 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                         }
                     }
                     
-                    // Default isShort to false if still undefined
+                    // Check URL for Shorts before defaulting
                     if (result.isShort === undefined) {
-                        result.isShort = false;
+                        // Check if URL contains /shorts/ as a strong indicator
+                        if (videoUrl && videoUrl.includes('/shorts/')) {
+                            result.isShort = true;
+                        } else {
+                            // Only default to false if URL doesn't indicate Shorts
+                            result.isShort = false;
+                        }
+                    }
+                    
+                    // Shorts-specific data extraction
+                    if (result.isShort) {
+                        // Extract view count from Shorts-specific locations if not already set
+                        if (!result.view_count) {
+                            // Try multiple Shorts-specific paths
+                            const paths = [
+                                // Path 1: reelPlayerOverlayRenderer
+                                ytData?.contents?.singleColumnWatchNextResults?.results?.results?.contents?.[0]?.reelPlayerOverlayRenderer,
+                                // Path 2: reelWatchRenderer
+                                ytData?.contents?.singleColumnWatchNextResults?.results?.results?.contents?.[0]?.reelWatchRenderer,
+                                // Path 3: Check all contents for reel-related renderers
+                                ...(ytData?.contents?.singleColumnWatchNextResults?.results?.results?.contents || []),
+                            ];
+                            
+                            for (const path of paths) {
+                                if (!path) continue;
+                                
+                                // Try reelPlayerHeaderRenderer
+                                const header = path?.reelPlayerHeaderSupportedRenderers?.reelPlayerHeaderRenderer ||
+                                             path?.reelPlayerHeaderRenderer;
+                                if (header?.viewCountText) {
+                                    const viewText = header.viewCountText.simpleText ||
+                                                   header.viewCountText.runs?.[0]?.text ||
+                                                   header.viewCountText?.accessibility?.accessibilityData?.label;
+                                    if (viewText) {
+                                        const match = viewText.match(/([\d.,]+[KMB]?)/);
+                                        if (match) {
+                                            let num = parseFloat(match[1].replace(/,/g, ''));
+                                            const matchText = match[1];
+                                            if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                            else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                            else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                            if (num > 0 && num < 10000000000) {
+                                                result.view_count = Math.floor(num);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Try videoPrimaryInfoRenderer for Shorts
+                                const primaryInfo = path?.videoPrimaryInfoRenderer;
+                                if (primaryInfo?.viewCount?.videoViewCountRenderer) {
+                                    const viewCount = primaryInfo.viewCount.videoViewCountRenderer.viewCount?.simpleText ||
+                                                    primaryInfo.viewCount.videoViewCountRenderer.originalViewCount;
+                                    if (viewCount) {
+                                        const match = viewCount.match(/([\d.,]+[KMB]?)/);
+                                        if (match) {
+                                            let num = parseFloat(match[1].replace(/,/g, ''));
+                                            const matchText = match[1];
+                                            if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                            else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                            else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                            if (num > 0 && num < 10000000000) {
+                                                result.view_count = Math.floor(num);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Try engagement panels for view count
+                            if (!result.view_count && engagementPanels) {
+                                for (const panel of engagementPanels) {
+                                    const panelContent = panel?.engagementPanelSectionListRenderer?.content;
+                                    if (panelContent?.structuredDescriptionContentRenderer?.items) {
+                                        for (const item of panelContent.structuredDescriptionContentRenderer.items) {
+                                            const viewCountText = item?.videoDescriptionHeaderRenderer?.viewCountText?.simpleText ||
+                                                                 item?.videoDescriptionHeaderRenderer?.viewCountText?.runs?.[0]?.text;
+                                            if (viewCountText) {
+                                                const match = viewCountText.match(/([\d.,]+[KMB]?)/);
+                                                if (match) {
+                                                    let num = parseFloat(match[1].replace(/,/g, ''));
+                                                    const matchText = match[1];
+                                                    if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                                    else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                                    else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                                    if (num > 0 && num < 10000000000) {
+                                                        result.view_count = Math.floor(num);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Extract comment count from Shorts-specific locations
+                        if (!result.comment_count) {
+                            // Try multiple Shorts-specific paths for comment count
+                            const paths = [
+                                ytData?.contents?.singleColumnWatchNextResults?.results?.results?.contents?.[0]?.reelPlayerOverlayRenderer,
+                                ...(ytData?.contents?.singleColumnWatchNextResults?.results?.results?.contents || []),
+                            ];
+                            
+                            for (const path of paths) {
+                                if (!path) continue;
+                                
+                                // Try reelPlayerActionsRenderer comment button
+                                const actions = path?.reelPlayerActionsRenderer?.actionButtons;
+                                if (actions) {
+                                    for (const button of actions) {
+                                        if (button?.commentButtonRenderer?.commentCount) {
+                                            const commentCount = button.commentButtonRenderer.commentCount.simpleText ||
+                                                               button.commentButtonRenderer.commentCount.runs?.[0]?.text ||
+                                                               button.commentButtonRenderer.commentCount?.accessibility?.accessibilityData?.label;
+                                            if (commentCount) {
+                                                const match = commentCount.match(/([\d.,]+[KMB]?)/);
+                                                if (match) {
+                                                    let num = parseFloat(match[1].replace(/,/g, ''));
+                                                    const matchText = match[1];
+                                                    if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                                    else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                                    else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                                    if (num > 0 && num < 100000000) {
+                                                        result.comment_count = Math.floor(num);
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Try commentsEntryPointHeaderRenderer
+                                if (path?.commentsEntryPointHeaderRenderer?.commentCount) {
+                                    const commentCount = path.commentsEntryPointHeaderRenderer.commentCount.simpleText ||
+                                                       path.commentsEntryPointHeaderRenderer.commentCount.runs?.[0]?.text;
+                                    if (commentCount) {
+                                        const match = commentCount.match(/([\d.,]+[KMB]?)/);
+                                        if (match) {
+                                            let num = parseFloat(match[1].replace(/,/g, ''));
+                                            const matchText = match[1];
+                                            if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                            else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                            else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                            if (num > 0 && num < 100000000) {
+                                                result.comment_count = Math.floor(num);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Try engagement panels for comment count
+                            if (!result.comment_count && engagementPanels) {
+                                for (const panel of engagementPanels) {
+                                    const panelContent = panel?.engagementPanelSectionListRenderer?.content;
+                                    // Check for comment count in various Shorts panel locations
+                                    const commentCountText = panelContent?.structuredDescriptionContentRenderer?.items?.[0]?.videoDescriptionHeaderRenderer?.commentCountText?.simpleText ||
+                                                           panelContent?.structuredDescriptionContentRenderer?.items?.[0]?.videoDescriptionHeaderRenderer?.commentCountText?.runs?.[0]?.text;
+                                    if (commentCountText) {
+                                        const match = commentCountText.match(/([\d.,]+[KMB]?)/);
+                                        if (match) {
+                                            let num = parseFloat(match[1].replace(/,/g, ''));
+                                            const matchText = match[1];
+                                            if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                            else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                            else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                            if (num > 0 && num < 100000000) {
+                                                result.comment_count = Math.floor(num);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Check for commentsEntryPointHeaderRenderer in Shorts panels
+                                    if (panelContent?.commentsEntryPointHeaderRenderer?.commentCount) {
+                                        const commentCount = panelContent.commentsEntryPointHeaderRenderer.commentCount.simpleText ||
+                                                           panelContent.commentsEntryPointHeaderRenderer.commentCount.runs?.[0]?.text;
+                                        if (commentCount) {
+                                            const match = commentCount.match(/([\d.,]+[KMB]?)/);
+                                            if (match) {
+                                                let num = parseFloat(match[1].replace(/,/g, ''));
+                                                const matchText = match[1];
+                                                if (matchText.includes('K') || matchText.includes('k')) num *= 1000;
+                                                else if (matchText.includes('M') || matchText.includes('m')) num *= 1000000;
+                                                else if (matchText.includes('B') || matchText.includes('b')) num *= 1000000000;
+                                                if (num > 0 && num < 100000000) {
+                                                    result.comment_count = Math.floor(num);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Extract mentions from shortDescription if not already found
+                        if (!result.mentions) {
+                            const playerResponse = (window as any).ytInitialPlayerResponse;
+                            const shortDesc = playerResponse?.videoDetails?.shortDescription;
+                            if (shortDesc) {
+                                const mentions = shortDesc.match(/@[\w.]+/g);
+                                if (mentions) {
+                                    result.mentions = mentions.map((m: string) => m.substring(1));
+                                }
+                            }
+                        }
+                        
+                        // Extract tags from videoDetails.keywords if not already set
+                        if (!result.tags) {
+                            const playerResponse = (window as any).ytInitialPlayerResponse;
+                            const keywords = playerResponse?.videoDetails?.keywords;
+                            if (keywords && Array.isArray(keywords) && keywords.length > 0) {
+                                result.tags = keywords;
+                            }
+                        }
                     }
                     
                     // Default isUpcoming to false if still undefined
@@ -972,7 +1323,7 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                 }
 
                 return result;
-            });
+            }, videoUrl);
 
             return data;
         } catch (error) {

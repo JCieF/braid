@@ -1,5 +1,5 @@
-import { CreatorMetadataManager } from "./src/scrapers/CreatorMetadataManager.js";
-import { Logger } from "./src/helpers/StringBuilder.js";
+import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager.js";
+import { Logger } from "../../src/helpers/StringBuilder.js";
 
 const mockInvokeEvent = {
     sender: {
@@ -15,7 +15,12 @@ async function testYouTube() {
     console.log("=== YouTube Scraper Test ===\n");
     
     const logger = new Logger("test-youtube", mockInvokeEvent);
+    //Regular video, uncomment to test
     const testUrl = process.argv[2] || "https://www.youtube.com/watch?v=kPa7bsKwL-c&list=RDkPa7bsKwL-c&start_radio=1";
+    //Kid video, uncomment to test
+    //const testUrl = process.argv[2] || "https://www.youtube.com/watch?v=e_04ZrNroTo&list=RDe_04ZrNroTo&start_radio=1";
+    //Shorts video, uncomment to test
+    //const testUrl = process.argv[2] || "https://www.youtube.com/shorts/jvp9EYIuq3Q";
     
     const manager = new CreatorMetadataManager(logger, {
         browserType: "chromium",

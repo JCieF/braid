@@ -22,6 +22,12 @@
 import path = require("path");
 import { Logger } from "./helpers/StringBuilder.js";
 import { VideoDownloader } from "./VideoDownloader.js";
+import { extractMetadata } from "./handlers/extractMetadata.js";
+import { extractExtendedMetadata } from "./handlers/extractExtendedMetadata.js";
+import { detectPlatform } from "./handlers/detectPlatform.js";
+import { ipcExtractMetadata } from "./ipc/extractMetadata.js";
+import { ipcExtractExtendedMetadata } from "./ipc/extractExtendedMetadata.js";
+import { ipcDetectPlatform } from "./ipc/detectPlatform.js";
 
 // Main exports - Primary classes users will interact with
 export { VideoDownloader } from "./VideoDownloader.js";
@@ -65,6 +71,16 @@ export { InstagramScraper } from "./scrapers/InstagramScraper.js";
 export { RedditScraper } from "./scrapers/RedditScraper.js";
 export { FacebookScraper } from "./scrapers/FacebookScraper.js";
 export { TwitchScraper } from "./scrapers/TwitchScraper.js";
+
+// Handler exports for extendr integration
+export { extractMetadata } from "./handlers/extractMetadata.js";
+export { extractExtendedMetadata } from "./handlers/extractExtendedMetadata.js";
+export { detectPlatform } from "./handlers/detectPlatform.js";
+
+// IPC handler exports
+export { ipcExtractMetadata } from "./ipc/extractMetadata.js";
+export { ipcExtractExtendedMetadata } from "./ipc/extractExtendedMetadata.js";
+export { ipcDetectPlatform } from "./ipc/detectPlatform.js";
 
 // Default export for convenience
 export default VideoDownloader;
@@ -242,7 +258,33 @@ async function download(e: any, downloadId: string, args: any) {
     return { downloadId, controllerId: downloadId };
 }
 
-export function main({ events }: { events: any }) {
-    events.on("extendr:getInfo", getInfo, -10);
-    events.on("extendr:download", download, -10);
+export function main({ events, channels, electron: { ipcMain } }: any) {
+    const extensionPath = __dirname;
+    const extensionRoot = extensionPath.replace(/[\\/]dist$/, '');
+    
+    console.log(`[Braid] Extension path: ${extensionPath}`);
+    console.log(`[Braid] Extension root: ${extensionRoot}`);
+
+    // Register channels for scraper functionality
+    const extractMetadataId = channels.register("extendr:extractMetadata");
+    const extractExtendedMetadataId = channels.register("extendr:extractExtendedMetadata");
+    const detectPlatformId = channels.register("extendr:detectPlatform");
+    
+    // Register existing channels
+    const getInfoId = channels.register("extendr:getInfo");
+    const downloadId = channels.register("extendr:download");
+
+    // Register event handlers
+    events.on(extractMetadataId, extractMetadata, -10);
+    events.on(extractExtendedMetadataId, extractExtendedMetadata, -10);
+    events.on(detectPlatformId, detectPlatform, -10);
+    events.on(getInfoId, getInfo, -10);
+    events.on(downloadId, download, -10);
+
+    // Register IPC handlers
+    ipcMain.handle(extractMetadataId, ipcExtractMetadata);
+    ipcMain.handle(extractExtendedMetadataId, ipcExtractExtendedMetadata);
+    ipcMain.handle(detectPlatformId, ipcDetectPlatform);
+
+    console.log('[Braid] Extension initialized successfully');
 }

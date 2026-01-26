@@ -21,6 +21,7 @@ export interface BrowserConfig {
     javaScriptEnabled?: boolean;
     disableImages?: boolean;
     firefoxUserDataDir?: string;
+    userDataDir?: string;
 }
 
 export interface DownloadConfig {
@@ -95,8 +96,16 @@ export interface CreatorMetadata {
     creator_name?: string;
     creator_username?: string;
     creator_avatar_url?: string;
+    creator_avatar_url_100?: string;
+    creator_avatar_large_url?: string;
     creator_bio?: string;
     creator_follower_count?: number;
+    creator_following_count?: number;
+    creator_likes_count?: number;
+    creator_video_count?: number;
+    creator_open_id?: string;
+    creator_union_id?: string;
+    creator_profile_deep_link?: string;
     creator_verified?: boolean;
     platform: string;
     extractedAt: number;
@@ -213,6 +222,80 @@ export interface VideoMetadata {
     playlist_id?: string; // Playlist ID (Research API only)
     voice_to_text?: string; // Transcript (Research API only)
     region_code?: string; // Regional data (Research API only)
+
+    // Facebook-specific fields that yt-dlp cannot extract
+    updated_time?: number; // Last update timestamp
+    content_category?: string; // Video category
+    embed_html?: string; // Embed iframe code
+    icon?: string; // Video type icon URL
+    is_crosspost_video?: boolean; // Crossposted from another page
+    is_crossposting_eligible?: boolean; // Can be crossposted
+    is_episode?: boolean; // Part of a series
+    is_instagram_eligible?: boolean; // Can be shared to IG
+    live_status?: string; // LIVE, VOD, etc.
+    post_views?: number; // Views not aggregated with crossposts
+    premiere_living_room_status?: string; // Premiere status
+    privacy?: string; // Privacy settings
+    published?: boolean; // Is published
+    status?: string; // Upload/processing status
+    universal_video_id?: string; // Cross-platform ID
+    total_video_views_unique?: number; // Unique viewers
+    total_video_avg_time_watched?: number; // Average watch time (ms)
+    total_video_complete_views?: number; // 95%+ completion views
+    total_video_10s_views?: number; // 10s+ views
+    total_video_30s_views?: number; // 30s+ views
+    total_video_60s_excludes_shorter_views?: number; // 60s views (excludes short)
+    reaction_love_count?: number; // LOVE reactions
+    reaction_wow_count?: number; // WOW reactions
+    reaction_haha_count?: number; // HAHA reactions
+    reaction_sad_count?: number; // SAD reactions
+    reaction_angry_count?: number; // ANGRY reactions
+
+    // Twitter/X-specific fields that yt-dlp cannot extract
+    context_annotations?: any[]; // AI-detected topics/entities
+    conversation_id?: string; // Thread ID
+    edit_controls?: {
+        edits_remaining?: number;
+        is_edit_eligible?: boolean;
+        editable_until?: string;
+    };
+    edit_history_tweet_ids?: string[]; // Previous versions
+    entities_hashtags?: Array<{ text: string; indices?: [number, number] }>; // Parsed hashtags with indices
+    entities_mentions?: Array<{ username: string; id?: string; indices?: [number, number] }>; // Parsed @mentions
+    entities_urls?: Array<{ url: string; expanded_url?: string; display_url?: string; indices?: [number, number] }>; // Expanded URLs
+    entities_cashtags?: Array<{ text: string; indices?: [number, number] }>; // Stock ticker symbols
+    geo?: {
+        place_id?: string;
+        coordinates?: { type: string; coordinates: number[] };
+    }; // Place/geolocation data
+    in_reply_to_user_id?: string; // Reply context
+    reply_settings?: string; // everyone, mentionedUsers, following
+    source?: string; // App used to post
+    withheld?: {
+        copyright?: boolean;
+        country_codes?: string[];
+        scope?: string;
+    }; // Withholding info by country
+    reply_count?: number; // Reply count (yt-dlp doesn't extract)
+    quote_count?: number; // Quote tweets count
+    bookmark_count?: number; // Bookmark count
+    impression_count?: number; // Views/impressions
+    media_key?: string; // Internal media identifier
+    tweet_language?: string; // BCP47 language tag
+    possibly_sensitive?: boolean; // Sensitive content flag
+    creator_created_at?: number; // Account creation date (timestamp)
+    creator_description?: string; // User bio
+    creator_location?: string; // User-defined location
+    creator_profile_image_url?: string; // Profile picture URL
+    creator_protected?: boolean; // Protected account status
+    creator_following_count?: number; // Following count
+    creator_tweet_count?: number; // Total tweets
+    creator_listed_count?: number; // Listed count
+    creator_verified?: boolean; // Legacy verification
+    creator_verified_type?: string; // blue, business, government, none
+    place_full_name?: string; // Place full name
+    place_country?: string; // Place country
+    place_geo?: any; // Place GeoJSON coordinates
 }
 
 /**

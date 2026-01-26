@@ -1,5 +1,5 @@
-import { CreatorMetadataManager } from "./src/scrapers/CreatorMetadataManager.js";
-import { Logger } from "./src/helpers/StringBuilder.js";
+import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager.js";
+import { Logger } from "../../src/helpers/StringBuilder.js";
 
 const mockInvokeEvent = {
     sender: {

@@ -1,6 +1,6 @@
 import { chromium } from "playwright";
-import { TwitchScraper } from "./src/scrapers/TwitchScraper.js";
-import { Logger } from "./src/helpers/StringBuilder.js";
+import { TwitchScraper } from "../../src/scrapers/TwitchScraper.js";
+import { Logger } from "../../src/helpers/StringBuilder.js";
 
 const mockInvokeEvent = {
     sender: {
