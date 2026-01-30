@@ -311,6 +311,14 @@ export interface CreatorMetadataScraperConfig {
     browserConfig?: BrowserConfig;
     timeout?: number;
     retries?: number;
+    apiConfig?: {
+        baseUrl?: string;
+        timeout?: number;
+        retries?: number;
+        enabled?: boolean;
+    };
+    scraperMode?: 'local' | 'api' | 'hybrid';
+    platformOverrides?: Record<PlatformType, 'local' | 'api' | 'hybrid'>;
 }
 
 /**

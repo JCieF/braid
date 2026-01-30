@@ -11,6 +11,14 @@ export interface ExtractMetadataArgs {
         height: number;
     };
     firefoxUserDataDir?: string;
+    apiConfig?: {
+        baseUrl?: string;
+        timeout?: number;
+        retries?: number;
+        enabled?: boolean;
+    };
+    scraperMode?: 'local' | 'api' | 'hybrid';
+    platformOverrides?: Record<string, 'local' | 'api' | 'hybrid'>;
 }
 
 export async function extractMetadata(e: any, args: ExtractMetadataArgs) {
@@ -54,6 +62,9 @@ export async function extractMetadata(e: any, args: ExtractMetadataArgs) {
         const manager = new CreatorMetadataManager(logger, {
             browserType,
             browserConfig,
+            apiConfig: args.apiConfig,
+            scraperMode: args.scraperMode,
+            platformOverrides: args.platformOverrides,
         });
 
         const metadata = await manager.extractMetadata(url);

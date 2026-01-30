@@ -21,6 +21,7 @@
     "test:reddit": "ts-node tests/manual/test-reddit.ts",
     "test:twitter": "ts-node tests/manual/test-twitter.ts",
     "test:twitch": "ts-node tests/manual/test-twitch.ts",
+    "test:api": "ts-node tests/manual/test-api-scrapers.ts",
     "benchmark": "ts-node benchmarks/benchmark-scrapers.ts",
     "benchmark:youtube": "PLATFORMS=youtube ts-node benchmarks/benchmark-scrapers.ts",
     "benchmark:export": "EXPORT_JSON=benchmark-results.json EXPORT_CSV=benchmark-results.csv ts-node benchmarks/benchmark-scrapers.ts",

@@ -1,0 +1,209 @@
+{
+  "timestamp": "2026-01-29T14:32:57.676Z",
+  "summary": [
+    {
+      "platform": "youtube",
+      "totalRuns": 10,
+      "successCount": 10,
+      "successRate": 100,
+      "avgTotalTime": 31126.854833900004,
+      "avgMemoryUsage": 9.504069519042968,
+      "minTime": 28033.856900999992,
+      "maxTime": 35314.244595999975,
+      "timeRange": 7280.387694999983,
+      "stdDeviation": 2981.548717841333,
+      "coefficientOfVariation": 9.57870216490409,
+      "errors": []
+    },
+    {
+      "platform": "tiktok",
+      "totalRuns": 5,
+      "successCount": 5,
+      "successRate": 100,
+      "avgTotalTime": 25716.313034400006,
+      "avgMemoryUsage": -13.189787292480469,
+      "minTime": 24167.297155000037,
+      "maxTime": 31462.016464999993,
+      "timeRange": 7294.719309999957,
+      "stdDeviation": 2873.600823996408,
+      "coefficientOfVariation": 11.174233336452511,
+      "errors": []
+    },
+    {
+      "platform": "twitch",
+      "totalRuns": 5,
+      "successCount": 5,
+      "successRate": 100,
+      "avgTotalTime": 14021.593570599984,
+      "avgMemoryUsage": 12.800399780273438,
+      "minTime": 13776.985920999956,
+      "maxTime": 14584.470570000005,
+      "timeRange": 807.4846490000491,
+      "stdDeviation": 294.8432714767934,
+      "coefficientOfVariation": 2.1027800441670985,
+      "errors": []
+    }
+  ],
+  "detailedResults": [
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/shorts/jvp9EYIuq3Q",
+      "iteration": 1,
+      "success": true,
+      "totalTime": 28346.090455999998,
+      "memoryUsage": 1.0419540405273438
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/shorts/jvp9EYIuq3Q",
+      "iteration": 2,
+      "success": true,
+      "totalTime": 29034.565314000003,
+      "memoryUsage": 2.5225372314453125
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/shorts/jvp9EYIuq3Q",
+      "iteration": 3,
+      "success": true,
+      "totalTime": 28159.329424000003,
+      "memoryUsage": -3.6570281982421875
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/shorts/jvp9EYIuq3Q",
+      "iteration": 4,
+      "success": true,
+      "totalTime": 28033.856900999992,
+      "memoryUsage": 15.849609375
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/shorts/jvp9EYIuq3Q",
+      "iteration": 5,
+      "success": true,
+      "totalTime": 33017.655459,
+      "memoryUsage": 43.27855682373047
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=kPa7bsKwL-c",
+      "iteration": 1,
+      "success": true,
+      "totalTime": 35314.244595999975,
+      "memoryUsage": 53.52314758300781
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=kPa7bsKwL-c",
+      "iteration": 2,
+      "success": true,
+      "totalTime": 35086.33759399998,
+      "memoryUsage": -84.88045501708984
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=kPa7bsKwL-c",
+      "iteration": 3,
+      "success": true,
+      "totalTime": 30153.04422499999,
+      "memoryUsage": 64.12290954589844
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=kPa7bsKwL-c",
+      "iteration": 4,
+      "success": true,
+      "totalTime": 35138.24196300001,
+      "memoryUsage": -60.069435119628906
+    },
+    {
+      "platform": "youtube",
+      "url": "https://www.youtube.com/watch?v=kPa7bsKwL-c",
+      "iteration": 5,
+      "success": true,
+      "totalTime": 28985.182407000044,
+      "memoryUsage": 63.30889892578125
+    },
+    {
+      "platform": "tiktok",
+      "url": "https://www.tiktok.com/@username/video/1234567890",
+      "iteration": 1,
+      "success": true,
+      "totalTime": 24275.231898,
+      "memoryUsage": -57.04933166503906
+    },
+    {
+      "platform": "tiktok",
+      "url": "https://www.tiktok.com/@username/video/1234567890",
+      "iteration": 2,
+      "success": true,
+      "totalTime": 24307.267443999997,
+      "memoryUsage": 21.035072326660156
+    },
+    {
+      "platform": "tiktok",
+      "url": "https://www.tiktok.com/@username/video/1234567890",
+      "iteration": 3,
+      "success": true,
+      "totalTime": 31462.016464999993,
+      "memoryUsage": -13.352066040039062
+    },
+    {
+      "platform": "tiktok",
+      "url": "https://www.tiktok.com/@username/video/1234567890",
+      "iteration": 4,
+      "success": true,
+      "totalTime": 24167.297155000037,
+      "memoryUsage": -29.82353973388672
+    },
+    {
+      "platform": "tiktok",
+      "url": "https://www.tiktok.com/@username/video/1234567890",
+      "iteration": 5,
+      "success": true,
+      "totalTime": 24369.752210000006,
+      "memoryUsage": 13.240928649902344
+    },
+    {
+      "platform": "twitch",
+      "url": "https://www.twitch.tv/videos/1234567890",
+      "iteration": 1,
+      "success": true,
+      "totalTime": 13903.954680999974,
+      "memoryUsage": 24.93224334716797
+    },
+    {
+      "platform": "twitch",
+      "url": "https://www.twitch.tv/videos/1234567890",
+      "iteration": 2,
+      "success": true,
+      "totalTime": 13811.655907000008,
+      "memoryUsage": 8.624679565429688
+    },
+    {
+      "platform": "twitch",
+      "url": "https://www.twitch.tv/videos/1234567890",
+      "iteration": 3,
+      "success": true,
+      "totalTime": 14030.90077399998,
+      "memoryUsage": 10.879600524902344
+    },
+    {
+      "platform": "twitch",
+      "url": "https://www.twitch.tv/videos/1234567890",
+      "iteration": 4,
+      "success": true,
+      "totalTime": 13776.985920999956,
+      "memoryUsage": -40.247596740722656
+    },
+    {
+      "platform": "twitch",
+      "url": "https://www.twitch.tv/videos/1234567890",
+      "iteration": 5,
+      "success": true,
+      "totalTime": 14584.470570000005,
+      "memoryUsage": 59.813072204589844
+    }
+  ]
+}

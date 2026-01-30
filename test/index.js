@@ -13506,7 +13506,10 @@ async function extractMetadata(e, args) {
     }
     const manager = new import_CreatorMetadataManager.CreatorMetadataManager(logger, {
       browserType,
-      browserConfig
+      browserConfig,
+      apiConfig: args.apiConfig,
+      scraperMode: args.scraperMode,
+      platformOverrides: args.platformOverrides
     });
     const metadata = await manager.extractMetadata(url);
     if (metadata) {
@@ -13559,7 +13562,10 @@ async function extractExtendedMetadata(e, args) {
     }
     const manager = new import_CreatorMetadataManager2.CreatorMetadataManager(logger, {
       browserType,
-      browserConfig
+      browserConfig,
+      apiConfig: args.apiConfig,
+      scraperMode: args.scraperMode,
+      platformOverrides: args.platformOverrides
     });
     const extendedMetadata = await manager.extractExtendedMetadata(url);
     if (extendedMetadata) {
