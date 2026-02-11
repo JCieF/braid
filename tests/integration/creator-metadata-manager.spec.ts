@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager.js";
-import { Logger } from "../../src/helpers/StringBuilder.js";
+import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager";
+import { Logger } from "../../src/helpers/StringBuilder";
 
 test.describe("CreatorMetadataManager Integration Tests", () => {
   let logger: Logger;

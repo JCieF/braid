@@ -1,6 +1,6 @@
-import { CreatorMetadataManager } from "../../dist/scrapers/CreatorMetadataManager.js";
-import { Logger } from "../../src/helpers/StringBuilder.js";
-import { BrowserType } from "../../src/types/index.js";
+import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager";
+import { Logger } from "../../src/helpers/StringBuilder";
+import { BrowserType } from "../../src/types/index";
 
 interface TestResult {
     url: string;
@@ -80,8 +80,14 @@ async function testApiScrapers() {
             const startTime = Date.now();
             
             try {
-                const config = {
-                    browserType: "chromium" as BrowserType,
+                const config: {
+                    browserType: BrowserType;
+                    browserConfig: { headless: boolean; viewport: { width: number; height: number } };
+                    apiConfig: { baseUrl: string; enabled: boolean; timeout: number; retries: number };
+                    scraperMode: 'local' | 'api' | 'hybrid';
+                    platformOverrides?: Record<string, 'local' | 'api' | 'hybrid'>;
+                } = {
+                    browserType: "chromium",
                     browserConfig: {
                         headless: true,
                         viewport: { width: 1920, height: 1080 },
@@ -94,7 +100,23 @@ async function testApiScrapers() {
                     },
                     scraperMode: testMode as 'local' | 'api' | 'hybrid',
                 };
-                
+                if (testMode === 'api') {
+                    config.platformOverrides = {
+                        youtube: 'api',
+                        facebook: 'api',
+                        twitter: 'api',
+                        reddit: 'api',
+                    };
+                }
+                if (testMode === 'hybrid') {
+                    config.platformOverrides = {
+                        youtube: 'hybrid',
+                        facebook: 'hybrid',
+                        twitter: 'hybrid',
+                        reddit: 'hybrid',
+                    };
+                }
+
                 console.log(`[TEST] Creating manager with config:`, JSON.stringify(config, null, 2));
                 const manager = new CreatorMetadataManager(logger as any, config);
                 
@@ -141,17 +163,21 @@ async function testApiScrapers() {
                     
                     if (creator) {
                         console.log("\n[CREATOR METADATA]");
-                        console.log("Name:", creator.creator_name || "N/A");
-                        console.log("Username:", creator.creator_username || "N/A");
-                        console.log("Followers:", creator.creator_follower_count || "N/A");
+                        console.log("Name:", creator.creator_name ?? "N/A");
+                        console.log("Username:", creator.creator_username ?? "N/A");
+                        const followers = creator.creator_follower_count;
+                        console.log("Followers:", followers !== undefined && followers !== null ? followers : "N/A");
                     }
                     
                     if (video) {
                         console.log("\n[VIDEO METADATA]");
-                        console.log("Video ID:", video.video_id || "N/A");
-                        console.log("Likes:", video.like_count || "N/A");
-                        console.log("Comments:", video.comment_count || "N/A");
-                        console.log("Views:", video.view_count || "N/A");
+                        console.log("Video ID:", video.video_id ?? "N/A");
+                        const likes = video.like_count;
+                        const comments = video.comment_count;
+                        const views = video.view_count;
+                        console.log("Likes:", likes !== undefined && likes !== null ? likes : "N/A");
+                        console.log("Comments:", comments !== undefined && comments !== null ? comments : "N/A");
+                        console.log("Views:", views !== undefined && views !== null ? views : "N/A");
                     }
                 } else {
                     results.push({

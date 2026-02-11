@@ -24,8 +24,22 @@ export class YouTubeScraper extends CreatorMetadataScraper {
         try {
             this.logger.log("Extracting YouTube creator metadata (avatar, verified)...", "info");
 
-            await page.goto(videoUrl, { waitUntil: "domcontentloaded" });
-            await this.delay(3000);
+            const videoIdMatch = videoUrl.match(/(?:v=|\/shorts\/)([a-zA-Z0-9_-]{11})/);
+            const currentUrl = page.url();
+            const alreadyOnVideoPage = videoIdMatch && (currentUrl.includes(videoIdMatch[1]) || currentUrl.includes("youtube.com/watch") || currentUrl.includes("youtube.com/shorts"));
+
+            if (!alreadyOnVideoPage) {
+                await page.goto(videoUrl, { waitUntil: "domcontentloaded" });
+                try {
+                    await page.waitForFunction(
+                        () => !!(window as any).ytInitialPlayerResponse || !!(window as any).ytInitialData,
+                        { timeout: 6000 }
+                    );
+                } catch {
+                    // Continue; selectors may still work
+                }
+                await this.delay(300);
+            }
 
             let channelUrl: string | null = null;
             const channelSelectors = [
@@ -52,14 +66,20 @@ export class YouTubeScraper extends CreatorMetadataScraper {
 
             this.logger.log(`Found channel URL: ${channelUrl}`, "debug");
 
-            await page.goto(channelUrl, { waitUntil: "networkidle" });
-            await this.delay(3000);
+            // Try to get creator (avatar, verified) from video page to avoid channel navigation
+            const fromVideoPage = await this.tryExtractCreatorFromVideoPage(page, channelUrl);
+            if (fromVideoPage) {
+                this.logger.log("Successfully extracted YouTube creator metadata from video page (skipped channel)", "info");
+                return fromVideoPage;
+            }
 
+            await page.goto(channelUrl, { waitUntil: "domcontentloaded" });
             try {
                 await page.waitForSelector('ytd-channel-avatar, #avatar', { timeout: 5000 });
             } catch {
                 // Continue if selector not found
             }
+            await this.delay(200);
 
             const metadata: CreatorMetadata = {
                 platform: "youtube",
@@ -88,42 +108,19 @@ export class YouTubeScraper extends CreatorMetadataScraper {
 
             const isShortUrl = videoUrl.includes("/shorts/");
 
-            // Shorts pages often keep background network activity going, which can cause
-            // `waitUntil: "networkidle"` to time out. Use a less strict load state.
-            await page.goto(videoUrl, { waitUntil: isShortUrl ? "domcontentloaded" : "networkidle" });
-            await this.delay(3000);
-            
-            // Wait for engagement metrics to load (like/comment counts)
-            // Shorts pages have different structure, so use different selectors
+            await page.goto(videoUrl, { waitUntil: "domcontentloaded" });
+            // Wait for embedded JSON (faster than waiting for custom elements to render)
             try {
-                if (isShortUrl) {
-                    // For Shorts, wait for Shorts-specific elements or just wait for data
-                    await page.waitForFunction(() => {
-                        return !!(window as any).ytInitialPlayerResponse || !!(window as any).ytInitialData;
-                    }, { timeout: 10000 });
-                } else {
-                    // For regular videos, wait for the standard selectors
-                    await page.waitForSelector('ytd-video-primary-info-renderer, #top-level-buttons-computed', { timeout: 5000 });
-                }
+                await page.waitForFunction(
+                    () => !!(window as any).ytInitialPlayerResponse || !!(window as any).ytInitialData,
+                    { timeout: isShortUrl ? 6000 : 5000 }
+                );
             } catch {
                 // Continue if not found - data might still be available
             }
-            await this.delay(2000);
-            
-            // Scroll to comments section to trigger loading (only for regular videos)
-            if (!isShortUrl) {
-                try {
-                    await page.evaluate(() => {
-                        const commentsSection = document.querySelector('ytd-comments-header-renderer, #comments');
-                        if (commentsSection) {
-                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                    });
-                    await this.delay(2000);
-                } catch {
-                    // Continue if scroll fails
-                }
-            }
+            await this.delay(200);
+
+            // Skip comments scroll: comment_count is extracted from ytInitialData; scroll was only for DOM fallback
 
             const videoIdMatch = videoUrl.match(/(?:v=|\/)([a-zA-Z0-9_-]{11})/);
 
@@ -144,14 +141,14 @@ export class YouTubeScraper extends CreatorMetadataScraper {
                 this.logger.log("Warning: extractYouTubeSpecificData returned null - data may not be available", "warn");
             }
             
-            // Fallback: Try DOM extraction for like_count and comment_count if JSON extraction failed
-            if (embeddedData) {
+            // Fallback: DOM extraction only when JSON missed like_count or comment_count (saves a full page.evaluate when JSON has both)
+            if (embeddedData && (embeddedData.like_count === undefined || embeddedData.comment_count === undefined)) {
                 const domData = await this.extractFromDOM(page);
                 if (domData) {
-                    if (!embeddedData.like_count && domData.like_count) {
+                    if (embeddedData.like_count === undefined && domData.like_count !== undefined) {
                         embeddedData.like_count = domData.like_count;
                     }
-                    if (!embeddedData.comment_count && domData.comment_count) {
+                    if (embeddedData.comment_count === undefined && domData.comment_count !== undefined) {
                         embeddedData.comment_count = domData.comment_count;
                     }
                 }
@@ -337,7 +334,7 @@ export class YouTubeScraper extends CreatorMetadataScraper {
 
     private async extractAvatarUrl(page: Page): Promise<string | undefined> {
         try {
-            await this.delay(2000);
+            await this.delay(200);
 
             // Try to find avatar via page.evaluate (most reliable)
             const avatar = await page.evaluate(() => {
@@ -447,6 +444,56 @@ export class YouTubeScraper extends CreatorMetadataScraper {
         }
     }
 
+    /**
+     * Try to extract creator (avatar, verified) from video page embedded data to skip channel navigation.
+     * Returns CreatorMetadata if we get avatar and/or verified from ytInitialData; null to fall back to channel page.
+     */
+    private async tryExtractCreatorFromVideoPage(page: Page, channelUrl: string): Promise<CreatorMetadata | null> {
+        try {
+            const raw = await page.evaluate(() => {
+                const yt = (window as any).ytInitialData;
+                if (!yt) return null;
+                const result: { avatar?: string; verified?: boolean } = {};
+                // twoColumnWatchNextResults (regular watch) or singleColumnWatchNextResults (Shorts)
+                const two = yt?.contents?.twoColumnWatchNextResults?.results?.results?.contents;
+                const single = yt?.contents?.singleColumnWatchNextResults?.results?.results?.contents;
+                const contents = two || single;
+                if (!contents || !Array.isArray(contents)) return null;
+                for (const c of contents) {
+                    const primary = c?.videoPrimaryInfoRenderer;
+                    const owner = primary?.owner?.videoOwnerRenderer;
+                    if (owner?.thumbnail?.thumbnails?.length) {
+                        const thumbs = owner.thumbnail.thumbnails;
+                        result.avatar = thumbs[thumbs.length - 1]?.url ?? thumbs[0]?.url;
+                    }
+                    if (primary?.badges) {
+                        for (const b of primary.badges) {
+                            const label = (b?.metadataBadgeRenderer?.label || "").toLowerCase();
+                            if (label.includes("verified")) {
+                                result.verified = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (result.avatar !== undefined && result.verified !== undefined) break;
+                }
+                return (result.avatar || result.verified !== undefined) ? result : null;
+            });
+            if (!raw) return null;
+            const metadata: CreatorMetadata = {
+                platform: "youtube",
+                url: channelUrl,
+                extractedAt: Date.now(),
+            };
+            if (raw.avatar && this.isValidAvatarUrl(raw.avatar)) metadata.creator_avatar_url = raw.avatar;
+            if (raw.verified !== undefined) metadata.creator_verified = raw.verified;
+            if (!metadata.creator_avatar_url && metadata.creator_verified === undefined) return null;
+            return metadata;
+        } catch {
+            return null;
+        }
+    }
+
     private async extractYouTubeSpecificData(page: Page, videoUrl?: string): Promise<{
         //fields that yt-dlp can get but i added here for completeness
         title?: string;
@@ -485,7 +532,7 @@ export class YouTubeScraper extends CreatorMetadataScraper {
             
             if (!hasData) {
                 this.logger.log("YouTube data not loaded yet, waiting...", "warn");
-                await this.delay(3000);
+                await this.delay(200);
             }
             
             const data = await page.evaluate((videoUrl) => {

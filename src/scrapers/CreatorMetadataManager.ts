@@ -1,4 +1,4 @@
-import { Page } from "playwright";
+import { Page, Route } from "playwright";
 import { CreatorMetadata, VideoMetadata, ExtendedMetadata, PlatformType, CreatorMetadataScraperConfig, BrowserType } from "../types/index.js";
 import { CreatorMetadataScraper } from "./CreatorMetadataScraper.js";
 import { YouTubeScraper } from "./YouTubeScraper.js";
@@ -13,6 +13,7 @@ import { FacebookApiScraper } from "./api/FacebookApiScraper.js";
 import { TwitterApiScraper } from "./api/TwitterApiScraper.js";
 import { InstagramApiScraper } from "./api/InstagramApiScraper.js";
 import { RedditApiScraper } from "./api/RedditApiScraper.js";
+import { YouTubeApiScraper } from "./api/YouTubeApiScraper.js";
 import { Logger } from "../helpers/StringBuilder.js";
 import { ChromiumBrowser } from "../browsers/ChromiumBrowser.js";
 import { FirefoxBrowser } from "../browsers/FirefoxBrowser.js";
@@ -37,16 +38,16 @@ export class CreatorMetadataManager {
         logAgent.log(`Determining scraper mode for platform: ${platform}`, "debug");
         logAgent.log(`Config scraperMode: ${this.config.scraperMode}, platformOverrides: ${JSON.stringify(this.config.platformOverrides)}`, "debug");
         
-        if (importantPlatforms.includes(platform) || localOnlyPlatforms.includes(platform)) {
-            console.log(`[DEBUG] Platform ${platform} is in important/localOnly list, using local mode`);
-            logAgent.log(`Platform ${platform} is in important/localOnly list, using local mode`, "debug");
-            return 'local';
-        }
-        
         if (this.config.platformOverrides?.[platform]) {
             console.log(`[DEBUG] Platform override found for ${platform}: ${this.config.platformOverrides[platform]}`);
             logAgent.log(`Platform override found for ${platform}: ${this.config.platformOverrides[platform]}`, "debug");
             return this.config.platformOverrides[platform];
+        }
+
+        if (importantPlatforms.includes(platform) || localOnlyPlatforms.includes(platform)) {
+            console.log(`[DEBUG] Platform ${platform} is in important/localOnly list, using local mode`);
+            logAgent.log(`Platform ${platform} is in important/localOnly list, using local mode`, "debug");
+            return 'local';
         }
         
         const mode = this.config.scraperMode || 'hybrid';
@@ -107,7 +108,8 @@ export class CreatorMetadataManager {
                 console.log(`[DEBUG] Creating RedditApiScraper`);
                 return new RedditApiScraper(this.logger, this.config);
             case "youtube":
-                return null;
+                console.log(`[DEBUG] Creating YouTubeApiScraper`);
+                return new YouTubeApiScraper(this.logger, this.config);
             default:
                 console.log(`[DEBUG] No API scraper available for platform: ${platform}`);
                 logAgent.log(`No API scraper available for platform: ${platform}`, "debug");
@@ -119,18 +121,25 @@ export class CreatorMetadataManager {
         const logAgent = this.logger.agent("CreatorMetadataManager");
         process.stderr.write(`[DEBUG] getScraperForPlatform called - platform: ${platform}, config.scraperMode: ${this.config.scraperMode}\n`);
         console.log(`[DEBUG] getScraperForPlatform called - platform: ${platform}, config.scraperMode: ${this.config.scraperMode}`);
+
+        const explicitApi = this.config.scraperMode === 'api' || this.config.platformOverrides?.[platform] === 'api';
+        if (explicitApi) {
+            const apiScraper = this.getApiScraper(platform);
+            if (apiScraper) {
+                logAgent.log(`Using API scraper (explicit api mode): ${apiScraper.constructor.name}`, "info");
+                return apiScraper;
+            }
+            if (this.config.scraperMode === 'api') {
+                logAgent.log(`API scraper not available for ${platform}, returning null`, "warn");
+                return null;
+            }
+        }
+
         const mode = this.getScraperMode(platform);
         process.stderr.write(`[DEBUG] getScraperMode returned: ${mode}\n`);
         console.log(`[DEBUG] getScraperMode returned: ${mode}`);
 
-        if (this.config.scraperMode === 'api' && mode !== 'api') {
-            const errorMsg = `SCRAPER MODE MISMATCH: config.scraperMode=${this.config.scraperMode}, but getScraperMode returned=${mode} for platform=${platform}`;
-            console.error(`[ERROR] ${errorMsg}`);
-            throw new Error(errorMsg);
-        }
-
-        logAgent.log(`getScraperForPlatform called - platform: ${platform}, mode: ${mode}, config.scraperMode: ${this.config.scraperMode}`, "info");
-        logAgent.log(`Using scraper mode: ${mode} for platform: ${platform}`, "info");
+        logAgent.log(`getScraperForPlatform - platform: ${platform}, mode: ${mode}`, "info");
         console.log(`[DEBUG] Using scraper mode: ${mode} for platform: ${platform}`);
 
         if (mode === 'local') {
@@ -172,6 +181,23 @@ export class CreatorMetadataManager {
 
         logAgent.log(`No scraper available for platform: ${platform}`, "warn");
         return null;
+    }
+
+    /**
+     * Set up a page for fast local metadata scraping: block heavy resources (image, font, media)
+     * and set a sensible default timeout. Call this after getPage() when using local scrapers.
+     */
+    private setupPageForFastScraping(page: Page): void {
+        const blockedResourceTypes = ["image", "font", "media"];
+        page.route("**/*", (route: Route) => {
+            const request = route.request();
+            if (request.resourceType() && blockedResourceTypes.includes(request.resourceType())) {
+                route.abort();
+            } else {
+                route.continue();
+            }
+        });
+        page.setDefaultTimeout(20000);
     }
 
     async extractMetadata(videoUrl: string): Promise<CreatorMetadata | null> {
@@ -217,6 +243,7 @@ export class CreatorMetadataManager {
                 logAgent.log("Failed to get browser page", "error");
                 return null;
             }
+            this.setupPageForFastScraping(page);
             const metadata = await scraper.extractMetadata(page, videoUrl);
 
             return metadata;
@@ -343,9 +370,12 @@ export class CreatorMetadataManager {
                 logAgent.log("Failed to get browser page", "error");
                 return null;
             }
-            
-            const creatorMetadata = await scraper.extractMetadata(page, videoUrl);
+            this.setupPageForFastScraping(page);
+
+            // Local scrapers: get video metadata first (one video page load), then creator (navigate to channel).
+            // This avoids loading the video page twice; extractMetadata can skip re-goto(video) when already on it.
             const videoMetadata = await scraper.extractVideoMetadata(page, videoUrl);
+            const creatorMetadata = await scraper.extractMetadata(page, videoUrl);
 
             const result: ExtendedMetadata = {};
             if (creatorMetadata) result.creator = creatorMetadata;
@@ -391,8 +421,8 @@ export class CreatorMetadataManager {
                 return null;
             }
 
-            const creatorMetadata = await scraper.extractMetadata(page, videoUrl);
             const videoMetadata = await scraper.extractVideoMetadata(page, videoUrl);
+            const creatorMetadata = await scraper.extractMetadata(page, videoUrl);
 
             const result: ExtendedMetadata = {};
             if (creatorMetadata) result.creator = creatorMetadata;

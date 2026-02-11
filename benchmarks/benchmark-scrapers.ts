@@ -1,5 +1,5 @@
-import { CreatorMetadataManager } from "../src/scrapers/CreatorMetadataManager.js";
-import { Logger } from "../src/helpers/StringBuilder.js";
+import { CreatorMetadataManager } from "../src/scrapers/CreatorMetadataManager";
+import { Logger } from "../src/helpers/StringBuilder";
 import { performance } from "perf_hooks";
 import * as fs from "fs";
 
@@ -62,13 +62,38 @@ class ScraperBenchmark {
             let error: string | undefined;
 
             try {
-                const manager = new CreatorMetadataManager(this.logger, {
+                const scraperMode = process.env.SCRAPER_MODE as "local" | "api" | undefined;
+                const apiBaseUrl = process.env.ML_API_BASE_URL || "https://ondemand-scraper-api.media-meter.in";
+                const useApi = scraperMode === "api";
+
+                const managerConfig: {
+                    browserType: "chromium" | "firefox" | "brave";
+                    browserConfig: { headless: boolean; viewport: { width: number; height: number } };
+                    scraperMode?: "api";
+                    platformOverrides?: Record<string, "api">;
+                    apiConfig?: { baseUrl: string; enabled: boolean };
+                } = {
                     browserType: browserType,
                     browserConfig: {
                         headless: true,
                         viewport: { width: 1920, height: 1080 },
                     },
-                });
+                };
+                if (useApi) {
+                    managerConfig.scraperMode = "api";
+                    managerConfig.platformOverrides = {
+                        youtube: "api",
+                        facebook: "api",
+                        twitter: "api",
+                        reddit: "api",
+                    };
+                    managerConfig.apiConfig = {
+                        baseUrl: apiBaseUrl,
+                        enabled: true,
+                    };
+                }
+
+                const manager = new CreatorMetadataManager(this.logger, managerConfig);
 
                 const metadata = await manager.extractExtendedMetadata(url);
 
@@ -107,8 +132,25 @@ class ScraperBenchmark {
         return platformResults;
     }
 
-    calculateStats(platform: string): PlatformStats {
-        const platformResults = this.results.filter(r => r.platform === platform);
+    private getUrlLabel(url: string): string {
+        if (url.includes("/shorts/")) return "Shorts";
+        if (url.includes("watch?v=") || url.includes("/watch/")) return "Watch";
+        if (url.includes("/reel/")) return "Reel";
+        if (url.includes("/status/")) return "Status";
+        if (url.includes("/comments/")) return "Post";
+        if (url.includes("/video/")) return "Video";
+        try {
+            const u = new URL(url);
+            return u.pathname.split("/").filter(Boolean).pop() || url.slice(0, 40);
+        } catch {
+            return url.slice(0, 40);
+        }
+    }
+
+    calculateStats(platform: string, url?: string): PlatformStats {
+        const platformResults = url
+            ? this.results.filter(r => r.platform === platform && r.url === url)
+            : this.results.filter(r => r.platform === platform);
         const successCount = platformResults.filter(r => r.success).length;
         const totalRuns = platformResults.length;
 
@@ -143,6 +185,10 @@ class ScraperBenchmark {
         };
     }
 
+    private formatSeconds(ms: number): string {
+        return `${(ms / 1000).toFixed(2)}s`;
+    }
+
     printResults(): void {
         console.log("\n" + "=".repeat(80));
         console.log("BENCHMARK RESULTS");
@@ -151,18 +197,23 @@ class ScraperBenchmark {
         const platforms = [...new Set(this.results.map(r => r.platform))];
 
         for (const platform of platforms) {
-            const stats = this.calculateStats(platform);
-            console.log(`\n[${platform.toUpperCase()}]`);
-            console.log(`  Success Rate: ${stats.successRate.toFixed(1)}% (${stats.successCount}/${stats.totalRuns})`);
-            console.log(`  Average Total Time: ${stats.avgTotalTime.toFixed(2)}ms`);
-            console.log(`  Average Memory Usage: ${stats.avgMemoryUsage.toFixed(2)}MB`);
-            console.log(`  Time Range: ${stats.minTime.toFixed(2)}ms - ${stats.maxTime.toFixed(2)}ms (Spread: ${stats.timeRange.toFixed(2)}ms)`);
-            console.log(`  Standard Deviation: ${stats.stdDeviation.toFixed(2)}ms`);
-            console.log(`  Consistency: ${stats.coefficientOfVariation.toFixed(1)}% (lower = more consistent)`);
-            
-            if (stats.errors.length > 0) {
-                console.log(`  Errors: ${stats.errors.length}`);
-                stats.errors.forEach(err => console.log(`    - ${err}`));
+            const urlsInPlatform = [...new Set(this.results.filter(r => r.platform === platform).map(r => r.url))];
+
+            for (const url of urlsInPlatform) {
+                const stats = this.calculateStats(platform, url);
+                const label = this.getUrlLabel(url);
+                console.log(`\n[${platform.toUpperCase()}] ${label}`);
+                console.log(`  URL: ${url}`);
+                console.log(`  Success Rate: ${stats.successRate.toFixed(1)}% (${stats.successCount}/${stats.totalRuns})`);
+                console.log(`  Average Total Time: ${this.formatSeconds(stats.avgTotalTime)}`);
+                console.log(`  Average Memory Usage: ${stats.avgMemoryUsage.toFixed(2)}MB`);
+                console.log(`  Time Range: ${this.formatSeconds(stats.minTime)} - ${this.formatSeconds(stats.maxTime)} (Spread: ${this.formatSeconds(stats.timeRange)})`);
+                console.log(`  Standard Deviation: ${this.formatSeconds(stats.stdDeviation)}`);
+                console.log(`  Consistency: ${stats.coefficientOfVariation.toFixed(1)}% (lower = more consistent)`);
+                if (stats.errors.length > 0) {
+                    console.log(`  Errors: ${stats.errors.length}`);
+                    stats.errors.forEach(err => console.log(`    - ${err}`));
+                }
             }
         }
 
@@ -213,6 +264,15 @@ async function runBenchmarks() {
             "https://www.youtube.com/shorts/jvp9EYIuq3Q",
             "https://www.youtube.com/watch?v=kPa7bsKwL-c",
         ],
+        facebook: [
+            "https://www.facebook.com/reel/4402969013312976",
+        ],
+        twitter: [
+            "https://twitter.com/user/status/1234567890",
+        ],
+        reddit: [
+            "https://www.reddit.com/r/videos/comments/example/",
+        ],
         tiktok: [
             "https://www.tiktok.com/@username/video/1234567890",
         ],
@@ -224,9 +284,14 @@ async function runBenchmarks() {
     const iterations = parseInt(process.env.ITERATIONS || "3");
     const browserType = (process.env.BROWSER || "chromium") as "chromium" | "firefox" | "brave";
     const platforms = process.env.PLATFORMS ? process.env.PLATFORMS.split(",") : Object.keys(testUrls);
+    const scraperMode = process.env.SCRAPER_MODE;
 
     console.log(`Running benchmarks: ${iterations} iterations per URL, Browser: ${browserType}`);
-    console.log(`Platforms: ${platforms.join(", ")}\n`);
+    console.log(`Platforms: ${platforms.join(", ")}`);
+    if (scraperMode === "api") {
+        console.log("Scraper mode: API (YouTube, Facebook, Twitter, Reddit use ML/DC API)");
+    }
+    console.log("");
 
     for (const platform of platforms) {
         const urls = testUrls[platform];

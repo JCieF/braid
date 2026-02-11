@@ -11,6 +11,7 @@ export abstract class ApiScraperAdapter extends CreatorMetadataScraper {
         enabled: boolean;
         pollInterval: number;
         maxPollAttempts: number;
+        resultsPath?: string;
     };
 
     constructor(logger: Logger, config: CreatorMetadataScraperConfig = {}) {
@@ -23,6 +24,7 @@ export abstract class ApiScraperAdapter extends CreatorMetadataScraper {
             enabled: config.apiConfig?.enabled !== false,
             pollInterval: 2000,
             maxPollAttempts: 30,
+            resultsPath: config.apiConfig?.resultsPath,
         };
 
         if (!this.apiConfig.baseUrl) {
@@ -123,6 +125,136 @@ export abstract class ApiScraperAdapter extends CreatorMetadataScraper {
         throw lastError || new Error("API request failed after all retries");
     }
 
+    /**
+     * Override to extract platform-specific video id from URL. Default returns null.
+     */
+    protected getVideoIdFromUrl(_url: string): string | null {
+        return null;
+    }
+
+    /**
+     * Normalize MLDC API payload (title, content, authors, engagements, reach_metrics, etc.)
+     * to creator shape (creator_name, creator_username, creator_follower_count, etc.).
+     */
+    protected normalizeApiPayloadToCreatorShape(payload: Record<string, unknown>): Record<string, unknown> {
+        const out: Record<string, unknown> = { ...payload };
+        const authors = payload.authors;
+        if (typeof authors === "string" && authors.trim()) {
+            out.creator_username = authors.trim();
+            if (out.creator_name == null) out.creator_name = authors.trim(); 
+        } else if (Array.isArray(authors) && authors.length > 0) {
+            const first = authors[0];
+            if (typeof first === "string" && first.trim()) {
+                out.creator_username = first.trim();
+                if (out.creator_name == null) out.creator_name = first.trim();
+            } else if (first && typeof first === "object") {
+                const author = first as Record<string, unknown>;
+                if (author.name != null) out.creator_name = String(author.name);
+                if (author.username != null) out.creator_username = String(author.username);
+                if (author.display_name != null && out.creator_name == null) out.creator_name = String(author.display_name);
+                if (author.title != null && out.creator_name == null) out.creator_name = String(author.title);
+                if (author.channel_name != null && out.creator_name == null) out.creator_name = String(author.channel_name);
+                if (author.channel_title != null && out.creator_name == null) out.creator_name = String(author.channel_title);
+                if (author.handle != null && out.creator_username == null) out.creator_username = String(author.handle);
+                if (author.avatar_url != null) out.creator_avatar_url = String(author.avatar_url);
+                if (author.profile_url != null) out.creator_profile_deep_link = String(author.profile_url);
+                if (author.follower_count != null) out.creator_follower_count = Number(author.follower_count);
+                if (author.subscriber_count != null) out.creator_follower_count = Number(author.subscriber_count);
+                if (author.subscribers != null && out.creator_follower_count == null) out.creator_follower_count = Number(author.subscribers);
+                if (author.id != null) out.creator_id = String(author.id);
+            }
+        }
+        const organicTraffic = payload.organic_traffic;
+        if (organicTraffic != null && typeof organicTraffic === "object") {
+            const ot = organicTraffic as Record<string, unknown>;
+            if (ot.followers != null && out.creator_follower_count == null) out.creator_follower_count = Number(ot.followers);
+        }
+        const reachMetrics = payload.reach_metrics;
+        if (reachMetrics != null && typeof reachMetrics === "object") {
+            const rm = reachMetrics as Record<string, unknown>;
+            if (out.creator_follower_count == null && rm.subscribers_count != null) out.creator_follower_count = Number(rm.subscribers_count);
+            if (out.creator_follower_count == null && rm.followers_count != null) out.creator_follower_count = Number(rm.followers_count);
+        }
+        if (payload.title != null && out.creator_name == null && typeof payload.authors === "undefined") out.creator_name = String(payload.title);
+        return out;
+    }
+
+    /**
+     * Normalize MLDC API payload to video shape (caption, description, timestamp, thumbnails,
+     * like_count, comment_count, view_count, etc.). video_id from getVideoIdFromUrl(url).
+     */
+    protected normalizeApiPayloadToVideoShape(payload: Record<string, unknown>, url: string): Record<string, unknown> {
+        const out: Record<string, unknown> = { ...payload };
+        const videoId = this.getVideoIdFromUrl(url);
+        if (videoId) out.video_id = videoId;
+        if (payload.title != null) out.caption = String(payload.title);
+        if (payload.content != null && typeof payload.content === "string") {
+            out.description = payload.content;
+            if (out.caption == null || (out.caption as string).length === 0) out.caption = payload.content;
+        }
+        const publishDate = payload.publish_date;
+        if (publishDate != null) {
+            if (typeof publishDate === "number") out.timestamp = publishDate;
+            else if (typeof publishDate === "string") {
+                const parsed = Date.parse(publishDate);
+                if (!Number.isNaN(parsed)) out.timestamp = Math.floor(parsed / 1000);
+            }
+        }
+        const attachments = payload.attachments;
+        if (attachments != null && typeof attachments === "object") {
+            const photos = (attachments as Record<string, unknown>).photos;
+            if (Array.isArray(photos) && photos.length > 0) {
+                const urls = photos.filter((p): p is string => typeof p === "string");
+                if (urls.length > 0) out.thumbnails = urls;
+            } else if (Array.isArray(attachments) && attachments.length > 0) {
+                const urls: string[] = [];
+                for (const a of attachments as unknown[]) {
+                    if (typeof a === "string") urls.push(a);
+                    else if (a != null && typeof a === "object") {
+                        const o = a as Record<string, unknown>;
+                        if (typeof o.url === "string") urls.push(o.url);
+                        else if (typeof o.thumbnail_url === "string") urls.push(o.thumbnail_url);
+                        else if (typeof o.thumbnail === "string") urls.push(o.thumbnail);
+                    }
+                }
+                if (urls.length > 0) out.thumbnails = urls;
+            }
+        }
+        const engagements = payload.engagements;
+        if (engagements != null && typeof engagements === "object") {
+            const eng = engagements as Record<string, unknown>;
+            if (eng.likes != null) out.like_count = Number(eng.likes);
+            if (eng.like_count != null) out.like_count = Number(eng.like_count);
+            if (eng.likes_count != null) out.like_count = Number(eng.likes_count);
+            if (eng.comments != null) out.comment_count = Number(eng.comments);
+            if (eng.comment_count != null) out.comment_count = Number(eng.comment_count);
+            if (eng.comments_count != null) out.comment_count = Number(eng.comments_count);
+            if (eng.views != null) out.view_count = Number(eng.views);
+            if (eng.view_count != null) out.view_count = Number(eng.view_count);
+            if (eng.views_count != null) out.view_count = Number(eng.views_count);
+            if (eng.shares != null) out.share_count = Number(eng.shares);
+            if (eng.shares_count != null) out.share_count = Number(eng.shares_count);
+        }
+        const reachMetrics = payload.reach_metrics;
+        if (reachMetrics != null && typeof reachMetrics === "object") {
+            const rm = reachMetrics as Record<string, unknown>;
+            if (rm.views != null && out.view_count == null) out.view_count = Number(rm.views);
+            if (rm.view_count != null && out.view_count == null) out.view_count = Number(rm.view_count);
+            if (rm.views_count != null && out.view_count == null) out.view_count = Number(rm.views_count);
+            if (rm.impressions != null && out.view_count == null) out.view_count = Number(rm.impressions);
+        }
+        if (typeof payload.comments === "number") out.comment_count = payload.comment_count;
+        if (Array.isArray(payload.comments) && out.comment_count == null) out.comment_count = (payload.comments as unknown[]).length;
+        const virality = payload.virality;
+        if (virality != null && typeof virality === "object") {
+            const v = virality as Record<string, unknown>;
+            if (v.views != null && out.view_count == null) out.view_count = Number(v.views);
+            if (v.view_count != null && out.view_count == null) out.view_count = Number(v.view_count);
+        }
+        if (out.isShort === undefined && url.includes("/shorts/")) out.isShort = true;
+        return out;
+    }
+
     protected async scrapeAndPoll(url: string): Promise<any> {
         const logAgent = this.logger;
         
@@ -143,15 +275,19 @@ export abstract class ApiScraperAdapter extends CreatorMetadataScraper {
             const jobId = scrapeResponse.job_id;
             logAgent.log(`Scrape job initiated with job_id: ${jobId}`, "info");
 
+            const resultsPathBase = this.apiConfig.resultsPath ?? "/v1/social-media/results";
+            const resultsPath = resultsPathBase.includes("{job_id}") ? resultsPathBase.replace(/\{job_id\}/g, jobId) : `${resultsPathBase}/${jobId}`;
+            const resultsUrl = `${this.apiConfig.baseUrl}${resultsPath}`;
+            logAgent.log(`Results endpoint: GET ${resultsUrl}`, "debug");
+
             for (let attempt = 1; attempt <= this.apiConfig.maxPollAttempts; attempt++) {
                 await new Promise(resolve => setTimeout(resolve, this.apiConfig.pollInterval));
 
                 logAgent.log(`Polling results (attempt ${attempt}/${this.apiConfig.maxPollAttempts}) for job_id: ${jobId}`, "debug");
 
                 try {
-                    const resultsResponse = await this.makeApiRequest("/v1/social-media/results", null, {
-                        method: "POST",
-                        queryParams: { job_id: jobId },
+                    const resultsResponse = await this.makeApiRequest(resultsPath, null, {
+                        method: "GET",
                     });
 
                     if (attempt === 1 && resultsResponse) {
@@ -190,7 +326,12 @@ export abstract class ApiScraperAdapter extends CreatorMetadataScraper {
                         logAgent.log(`Results not ready: status=${(resultsResponse as any).status}, hasResults=${hasResults}, hasData=${hasData}`, "debug");
                     }
                 } catch (error) {
-                    logAgent.log(`Error polling results: ${error instanceof Error ? error.message : String(error)}`, "warn");
+                    const errMsg = error instanceof Error ? error.message : String(error);
+                    logAgent.log(`Error polling results: ${errMsg}`, "warn");
+                    if (errMsg.includes("status 404")) {
+                        logAgent.log(`Results endpoint returned 404 Not Found. Check apiConfig.resultsPath or ask API provider for the correct URL (e.g. GET ${resultsUrl})`, "error");
+                        return null;
+                    }
                     if (attempt < this.apiConfig.maxPollAttempts) {
                         continue;
                     }
@@ -250,8 +391,27 @@ export abstract class ApiScraperAdapter extends CreatorMetadataScraper {
         if (apiResponse.reach !== undefined) metadata.reach = Number(apiResponse.reach);
         if (apiResponse.timestamp !== undefined) metadata.timestamp = Number(apiResponse.timestamp);
         if (apiResponse.caption) metadata.caption = apiResponse.caption;
+        if (apiResponse.description) metadata.description = apiResponse.description;
+        if (apiResponse.thumbnails) metadata.thumbnails = Array.isArray(apiResponse.thumbnails) ? apiResponse.thumbnails : [];
         if (apiResponse.hashtags) metadata.hashtags = Array.isArray(apiResponse.hashtags) ? apiResponse.hashtags : [];
         if (apiResponse.mentions) metadata.mentions = Array.isArray(apiResponse.mentions) ? apiResponse.mentions : [];
+        if (apiResponse.duration !== undefined) metadata.duration = Number(apiResponse.duration);
+        if (apiResponse.channel_id) metadata.channel_id = String(apiResponse.channel_id);
+        if (apiResponse.channel_name) metadata.channel_name = apiResponse.channel_name;
+        if (apiResponse.definition) metadata.definition = apiResponse.definition;
+        if (apiResponse.concurrentViewers !== undefined) metadata.concurrentViewers = Number(apiResponse.concurrentViewers);
+        if (apiResponse.embeddable !== undefined) metadata.embeddable = Boolean(apiResponse.embeddable);
+        if (apiResponse.dimension) metadata.dimension = apiResponse.dimension;
+        if (apiResponse.projection) metadata.projection = apiResponse.projection;
+        if (apiResponse.madeForKids !== undefined) metadata.madeForKids = Boolean(apiResponse.madeForKids);
+        if (apiResponse.isShort !== undefined) metadata.isShort = Boolean(apiResponse.isShort);
+        if (apiResponse.isLive !== undefined) metadata.isLive = Boolean(apiResponse.isLive);
+        if (apiResponse.isUpcoming !== undefined) metadata.isUpcoming = Boolean(apiResponse.isUpcoming);
+        if (apiResponse.hasCaptions !== undefined) metadata.hasCaptions = Boolean(apiResponse.hasCaptions);
+        if (apiResponse.isUnlisted !== undefined) metadata.isUnlisted = Boolean(apiResponse.isUnlisted);
+        if (apiResponse.isAgeRestricted !== undefined) metadata.isAgeRestricted = Boolean(apiResponse.isAgeRestricted);
+        if (apiResponse.category) metadata.category = apiResponse.category;
+        if (apiResponse.defaultLanguage) metadata.defaultLanguage = apiResponse.defaultLanguage;
 
         return metadata;
     }

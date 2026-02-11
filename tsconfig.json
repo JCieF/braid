@@ -36,6 +36,9 @@
             // "tree-kill": ["./node_modules/tree-kill/index.d.ts"]
         }
     },
-    "include": ["src/**/*"]
-    // "include": ["*.js"] // Adjust the pattern to include your JS files
+    "include": ["src/**/*"],
+    "ts-node": {
+        "experimentalResolver": true,
+        "transpileOnly": true
+    }
 }

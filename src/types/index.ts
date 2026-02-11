@@ -316,6 +316,7 @@ export interface CreatorMetadataScraperConfig {
         timeout?: number;
         retries?: number;
         enabled?: boolean;
+        resultsPath?: string;
     };
     scraperMode?: 'local' | 'api' | 'hybrid';
     platformOverrides?: Record<PlatformType, 'local' | 'api' | 'hybrid'>;

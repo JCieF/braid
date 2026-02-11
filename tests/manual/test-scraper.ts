@@ -1,5 +1,5 @@
-import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager.js";
-import { Logger } from "../../src/helpers/StringBuilder.js";
+import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager";
+import { Logger } from "../../src/helpers/StringBuilder";
 
 interface TestResult {
     url: string;
