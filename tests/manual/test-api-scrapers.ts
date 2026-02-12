@@ -32,28 +32,29 @@ async function testApiScrapers() {
     const apiBaseUrl = process.env.ML_API_BASE_URL || "https://ondemand-scraper-api.media-meter.in";
     const testMode = process.env.TEST_MODE || "hybrid";
     const platformFilter = process.env.PLATFORM;
+    const jobId = process.env.SCRAPER_JOB_ID || process.env.ML_SCRAPER_JOB_ID;
     
     console.log(`API Base URL: ${apiBaseUrl}`);
     console.log(`Test Mode: ${testMode}`);
-    console.log(`Platform Filter: ${platformFilter || "all"}\n`);
+    console.log(`Platform Filter: ${platformFilter || "all"}`);
+    if (jobId) console.log(`Job ID (poll only): ${jobId}`);
+    console.log("");
     
     const testUrls: Record<string, string[]> = {
         facebook: [
             "https://www.facebook.com/reel/4402969013312976",
         ],
         twitter: [
-            "https://twitter.com/user/status/1234567890",
-            "https://x.com/user/status/1234567890",
+            "https://x.com/AKEndfield/status/2019969369565196529",
         ],
         reddit: [
-            "https://www.reddit.com/r/videos/comments/example/",
-            "https://www.reddit.com/user/example",
+            "https://www.reddit.com/r/Endfield/comments/1r1vpk5/_/",
         ],
         youtube: [
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         ],
         instagram: [
-            "https://www.instagram.com/p/ABC123/",
+            "https://www.instagram.com/lewishamilton/reel/DT5siczDI-O/",
         ],
     };
     
@@ -82,7 +83,7 @@ async function testApiScrapers() {
                 const config: {
                     browserType: BrowserType;
                     browserConfig: { headless: boolean; viewport: { width: number; height: number } };
-                    apiConfig: { baseUrl: string; enabled: boolean; timeout: number; retries: number };
+                    apiConfig: { baseUrl: string; enabled: boolean; timeout: number; retries: number; jobId?: string };
                     scraperMode: 'local' | 'api' | 'hybrid';
                     platformOverrides?: Record<string, 'local' | 'api' | 'hybrid'>;
                 } = {
@@ -96,6 +97,7 @@ async function testApiScrapers() {
                         enabled: true,
                         timeout: 30000,
                         retries: 3,
+                        ...(jobId ? { jobId } : {}),
                     },
                     scraperMode: testMode as 'local' | 'api' | 'hybrid',
                 };
@@ -105,6 +107,7 @@ async function testApiScrapers() {
                         facebook: 'api',
                         twitter: 'api',
                         reddit: 'api',
+                        instagram: 'api',
                     };
                 }
                 if (testMode === 'hybrid') {
@@ -113,6 +116,7 @@ async function testApiScrapers() {
                         facebook: 'hybrid',
                         twitter: 'hybrid',
                         reddit: 'hybrid',
+                        instagram: 'hybrid',
                     };
                 }
 
@@ -159,7 +163,7 @@ async function testApiScrapers() {
                     console.log(`Mode: ${testMode}`);
                     console.log(`Used API: ${usedApi}`);
                     console.log(`Used Local: ${usedLocal}`);
-                    
+
                     const has = (v: unknown): boolean =>
                         v !== undefined && v !== null && (typeof v !== "string" || v.length > 0) &&
                         (typeof v !== "object" || !Array.isArray(v) || v.length > 0);

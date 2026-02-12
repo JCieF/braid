@@ -25,7 +25,7 @@ async function testYouTube() {
     const manager = new CreatorMetadataManager(logger, {
         browserType: "chromium",
         browserConfig: {
-            headless: false,
+            headless: true,
             viewport: { width: 1920, height: 1080 },
         },
     });

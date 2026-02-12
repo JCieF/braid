@@ -110,6 +110,9 @@ export class CreatorMetadataManager {
             case "youtube":
                 console.log(`[DEBUG] Creating YouTubeApiScraper`);
                 return new YouTubeApiScraper(this.logger, this.config);
+            case "instagram":
+                console.log(`[DEBUG] Creating InstagramApiScraper`);
+                return new InstagramApiScraper(this.logger, this.config);
             default:
                 console.log(`[DEBUG] No API scraper available for platform: ${platform}`);
                 logAgent.log(`No API scraper available for platform: ${platform}`, "debug");
