@@ -38,11 +38,11 @@ interface GqlResponseData {
  * - is_branded_content: Sponsored content flag
  */
 export class TwitchScraper extends CreatorMetadataScraper {
-    
+
     private detectContentType(url: string): TwitchContentType {
         if (url.includes("/videos/")) return "vod";
         if (url.includes("/clip/") || url.includes("clips.twitch.tv")) return "clip";
-        
+
         const match = url.match(/twitch\.tv\/([^\/\?]+)/);
         if (match && match[1] !== "videos" && match[1] !== "directory") {
             if (!url.includes("/clip") && !url.includes("/videos")) {
@@ -61,7 +61,7 @@ export class TwitchScraper extends CreatorMetadataScraper {
     private extractClipSlug(url: string): string | null {
         const clipMatch = url.match(/\/clip\/([^\/\?]+)/);
         if (clipMatch) return clipMatch[1];
-        
+
         const clipsMatch = url.match(/clips\.twitch\.tv\/([^\/\?]+)/);
         if (clipsMatch) return clipsMatch[1];
         return null;
@@ -92,14 +92,14 @@ export class TwitchScraper extends CreatorMetadataScraper {
                     try {
                         const json = await response.json();
                         const responses = Array.isArray(json) ? json : [json];
-                        
+
                         for (const resp of responses) {
                             const opName = resp?.extensions?.operationName;
                             if (opName && resp?.data) {
                                 gqlData.set(opName, resp.data);
                             }
                         }
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             };
 
@@ -107,7 +107,24 @@ export class TwitchScraper extends CreatorMetadataScraper {
 
             try {
                 await page.goto(videoUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-                await this.delay(8000);
+
+                await Promise.race([
+                    page.waitForResponse((response: Response) => {
+                        const url = response.url();
+                        return url.includes("gql.twitch.tv") || url.includes("/gql");
+                    }, { timeout: 5000 }).catch(() => null),
+                    new Promise(resolve => setTimeout(resolve, 5000))
+                ]);
+
+                await this.delay(2000);
+
+                try {
+                    await page.waitForSelector('[data-a-target="player-overlay-click-handler"], video, [data-test-selector="video-player"]', { timeout: 2000 });
+                } catch {
+                    // Continue if selector not found
+                }
+
+                await this.delay(500);
             } finally {
                 page.off("response", responseHandler);
             }
@@ -365,7 +382,7 @@ export class TwitchScraper extends CreatorMetadataScraper {
         if (classificationData?.clip?.contentClassificationLabels) {
             const labels = classificationData.clip.contentClassificationLabels;
             if (labels.length > 0) {
-                metadata.content_classification_labels = labels.map((l: any) => 
+                metadata.content_classification_labels = labels.map((l: any) =>
                     l.localizedName || l.id || l
                 );
             }
@@ -496,7 +513,7 @@ export class TwitchScraper extends CreatorMetadataScraper {
         // Extract tags from DOM (not available in GraphQL)
         const tags = await page.evaluate(() => {
             const tagElements: string[] = [];
-            
+
             // Method 1: Look for Twitch tag links (common pattern: /directory/tags/...)
             const tagLinks = document.querySelectorAll('a[href*="/directory/tags/"]');
             for (const link of tagLinks) {
@@ -539,14 +556,14 @@ export class TwitchScraper extends CreatorMetadataScraper {
             const scripts = document.querySelectorAll('script');
             for (const script of scripts) {
                 const content = script.textContent || "";
-                
+
                 // Look for tags array patterns
                 const patterns = [
                     /"tags"\s*:\s*\[(.*?)\]/,
                     /"streamTags"\s*:\s*\[(.*?)\]/,
                     /tags:\s*\[(.*?)\]/,
                 ];
-                
+
                 for (const pattern of patterns) {
                     const match = content.match(pattern);
                     if (match) {
@@ -582,14 +599,14 @@ export class TwitchScraper extends CreatorMetadataScraper {
             // Remove duplicates, filter out common false positives, and return
             const filtered = [...new Set(tagElements)].filter(tag => {
                 const lower = tag.toLowerCase();
-                return tag.length > 0 && 
-                       tag.length < 100 &&
-                       !lower.includes('tag') &&
-                       !lower.includes('tags') &&
-                       !lower.includes('viewer') &&
-                       !lower.includes('follow');
+                return tag.length > 0 &&
+                    tag.length < 100 &&
+                    !lower.includes('tag') &&
+                    !lower.includes('tags') &&
+                    !lower.includes('viewer') &&
+                    !lower.includes('follow');
             });
-            
+
             return filtered;
         });
 
@@ -620,11 +637,16 @@ export class TwitchScraper extends CreatorMetadataScraper {
             this.logger.log("Extracting Twitch creator metadata...", "info");
 
             let profileUrl = await this.getCreatorProfileUrl(videoUrl);
-            
+
             if (!profileUrl) {
                 await page.goto(videoUrl, { waitUntil: "domcontentloaded" });
-                await this.delay(3000);
-                
+                try {
+                    await page.waitForSelector('a[href*="/"]', { timeout: 2000 });
+                } catch {
+                    // Continue if selector not found
+                }
+                await this.delay(500);
+
                 const link = await this.getElementAttribute(page, 'a[href*="/"]', "href");
                 if (link && link.includes("twitch.tv/") && !link.includes("/videos/")) {
                     profileUrl = link.startsWith("http") ? link : `https://www.twitch.tv${link}`;
@@ -636,8 +658,27 @@ export class TwitchScraper extends CreatorMetadataScraper {
                 return null;
             }
 
+            const currentUrl = page.url();
+            const contentType = this.detectContentType(videoUrl);
+            const alreadyOnVideoPage = currentUrl.includes("twitch.tv") &&
+                (contentType === "vod" || contentType === "clip" || contentType === "stream");
+
+            if (alreadyOnVideoPage) {
+                this.logger.log("Already on video page, attempting to extract creator data from GraphQL first", "debug");
+                const fromVideoPage = await this.tryExtractCreatorFromGqlData(page, profileUrl);
+                if (fromVideoPage) {
+                    this.logger.log("Successfully extracted Twitch creator metadata from video page (skipped profile)", "info");
+                    return fromVideoPage;
+                }
+            }
+
             await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
-            await this.delay(3000);
+            try {
+                await page.waitForSelector('[data-a-target="user-channel-header-item"], h2, [data-a-target="user-avatar"]', { timeout: 3000 });
+            } catch {
+                // Continue if selector not found
+            }
+            await this.delay(500);
 
             const metadata: CreatorMetadata = {
                 platform: "twitch",
@@ -725,6 +766,104 @@ export class TwitchScraper extends CreatorMetadataScraper {
 
         } catch (error) {
             this.logger.log(`Failed to extract Twitch metadata: ${error}`, "error");
+            return null;
+        }
+    }
+
+    private async tryExtractCreatorFromGqlData(page: Page, profileUrl: string): Promise<CreatorMetadata | null> {
+        try {
+            const gqlData: Map<string, GqlResponseData> = new Map();
+            let hasData = false;
+
+            const responseHandler = async (response: Response) => {
+                const reqUrl = response.url();
+                if (reqUrl.includes("gql.twitch.tv") || reqUrl.includes("/gql")) {
+                    try {
+                        const json = await response.json();
+                        const responses = Array.isArray(json) ? json : [json];
+
+                        for (const resp of responses) {
+                            const opName = resp?.extensions?.operationName;
+                            if (opName && resp?.data) {
+                                gqlData.set(opName, resp.data);
+                                hasData = true;
+                            }
+                        }
+                    } catch (e) { }
+                }
+            };
+
+            page.on("response", responseHandler);
+
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            page.off("response", responseHandler);
+
+            if (!hasData) return null;
+
+            const metadata: CreatorMetadata = {
+                platform: "twitch",
+                url: profileUrl,
+                extractedAt: Date.now(),
+            };
+
+            const usernameMatch = profileUrl.match(/twitch\.tv\/([^\/\?]+)/);
+            if (usernameMatch) {
+                metadata.creator_username = usernameMatch[1];
+            }
+
+            let foundData = false;
+
+            for (const [opName, data] of gqlData.entries()) {
+                if (data.video?.owner) {
+                    const owner = data.video.owner;
+                    if (owner.displayName && !metadata.creator_name) {
+                        metadata.creator_name = owner.displayName;
+                        foundData = true;
+                    }
+                    if (owner.profileImageURL && !metadata.creator_avatar_url) {
+                        metadata.creator_avatar_url = owner.profileImageURL;
+                        foundData = true;
+                    }
+                }
+
+                if (data.user) {
+                    const user = data.user;
+                    if (user.displayName && !metadata.creator_name) {
+                        metadata.creator_name = user.displayName;
+                        foundData = true;
+                    }
+                    if (user.profileImageURL && !metadata.creator_avatar_url) {
+                        metadata.creator_avatar_url = user.profileImageURL;
+                        foundData = true;
+                    }
+                    if (user.description && !metadata.creator_bio) {
+                        metadata.creator_bio = user.description;
+                        foundData = true;
+                    }
+                    if (user.followers?.totalCount !== undefined && !metadata.creator_follower_count) {
+                        metadata.creator_follower_count = user.followers.totalCount;
+                        foundData = true;
+                    }
+                }
+
+                if (data.clip?.broadcaster) {
+                    const broadcaster = data.clip.broadcaster;
+                    if (broadcaster.displayName && !metadata.creator_name) {
+                        metadata.creator_name = broadcaster.displayName;
+                        foundData = true;
+                    }
+                    if (broadcaster.profileImageURL && !metadata.creator_avatar_url) {
+                        metadata.creator_avatar_url = broadcaster.profileImageURL;
+                        foundData = true;
+                    }
+                }
+            }
+
+            if (!foundData) return null;
+
+            return metadata;
+        } catch {
             return null;
         }
     }

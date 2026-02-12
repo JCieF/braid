@@ -43,8 +43,17 @@ export class FacebookApiScraper extends ApiScraperAdapter {
                 logAgent.log("API response has no mappable payload (creator)", "warn");
                 return null;
             }
+            const status = (payload as Record<string, unknown>).scrape_status;
+            if (status === "Queued" || status === "Processing") {
+                logAgent.log(`Scrape job not completed (status: ${status}), no creator metadata available`, "warn");
+                return null;
+            }
             logAgent.log(`Creator payload from: ${hasNestedData ? "data" : "top-level"}, keys: ${JSON.stringify(Object.keys(payload))}`, "debug");
+            if (payload.authors != null) logAgent.log(`Creator authors: ${JSON.stringify((payload as Record<string, unknown>).authors)}`, "debug");
+            if (payload.reach_metrics != null) logAgent.log(`Creator reach_metrics: ${JSON.stringify((payload as Record<string, unknown>).reach_metrics)}`, "debug");
+            if (payload.organic_traffic != null) logAgent.log(`Creator organic_traffic: ${JSON.stringify((payload as Record<string, unknown>).organic_traffic)}`, "debug");
             const normalized = this.normalizeApiPayloadToCreatorShape(payload as Record<string, unknown>);
+            logAgent.log(`Normalized creator data: ${JSON.stringify(normalized)}`, "debug");
             const metadata = this.mapApiResponseToCreatorMetadata(normalized, url, "facebook");
             logAgent.log("Successfully extracted Facebook metadata via API", "info");
 
@@ -73,8 +82,17 @@ export class FacebookApiScraper extends ApiScraperAdapter {
                 logAgent.log("API response has no mappable payload (video)", "warn");
                 return null;
             }
+            const status = (payload as Record<string, unknown>).scrape_status;
+            if (status === "Queued" || status === "Processing") {
+                logAgent.log(`Scrape job not completed (status: ${status}), no video metadata available`, "warn");
+                return null;
+            }
             logAgent.log(`Video payload from: ${hasNestedData ? "data" : "top-level"}, keys: ${JSON.stringify(Object.keys(payload))}`, "debug");
+            if (payload.engagements != null) logAgent.log(`Video engagements: ${JSON.stringify((payload as Record<string, unknown>).engagements)}`, "debug");
+            if (payload.reach_metrics != null) logAgent.log(`Video reach_metrics: ${JSON.stringify((payload as Record<string, unknown>).reach_metrics)}`, "debug");
+            if (payload.virality != null) logAgent.log(`Video virality: ${JSON.stringify((payload as Record<string, unknown>).virality)}`, "debug");
             const normalized = this.normalizeApiPayloadToVideoShape(payload as Record<string, unknown>, url);
+            logAgent.log(`Normalized video data: ${JSON.stringify(normalized)}`, "debug");
             const metadata = this.mapApiResponseToVideoMetadata(normalized, url, "facebook");
             logAgent.log("Successfully extracted Facebook video metadata via API", "info");
 

@@ -40,7 +40,6 @@ async function testApiScrapers() {
     const testUrls: Record<string, string[]> = {
         facebook: [
             "https://www.facebook.com/reel/4402969013312976",
-            "https://www.facebook.com/watch?v=1234567890",
         ],
         twitter: [
             "https://twitter.com/user/status/1234567890",
@@ -161,23 +160,59 @@ async function testApiScrapers() {
                     console.log(`Used API: ${usedApi}`);
                     console.log(`Used Local: ${usedLocal}`);
                     
+                    const has = (v: unknown): boolean =>
+                        v !== undefined && v !== null && (typeof v !== "string" || v.length > 0) &&
+                        (typeof v !== "object" || !Array.isArray(v) || v.length > 0);
+                    const fmt = (v: unknown): string => {
+                        if (!has(v)) return "";
+                        if (typeof v === "string" && v.length > 80) return v.slice(0, 77) + "...";
+                        return String(v);
+                    };
+                    const line = (label: string, value: unknown, formatter?: (x: unknown) => string): void => {
+                        const v = formatter ? formatter(value) : (has(value) ? String(value) : "");
+                        if (v !== "") console.log(`  ${label}:`, v);
+                    };
+
                     if (creator) {
                         console.log("\n[CREATOR METADATA]");
-                        console.log("Name:", creator.creator_name ?? "N/A");
-                        console.log("Username:", creator.creator_username ?? "N/A");
-                        const followers = creator.creator_follower_count;
-                        console.log("Followers:", followers !== undefined && followers !== null ? followers : "N/A");
+                        line("creator_id", creator.creator_id);
+                        line("Name", creator.creator_name);
+                        line("Username", creator.creator_username);
+                        line("Followers", creator.creator_follower_count);
+                        line("Following", creator.creator_following_count);
+                        line("Bio", creator.creator_bio, fmt);
+                        if (creator.creator_avatar_url) console.log("  Avatar URL: (set)");
+                        line("Profile link", creator.creator_profile_deep_link);
+                        if (creator.creator_verified !== undefined) console.log("  Verified:", creator.creator_verified);
                     }
-                    
+
                     if (video) {
                         console.log("\n[VIDEO METADATA]");
-                        console.log("Video ID:", video.video_id ?? "N/A");
-                        const likes = video.like_count;
-                        const comments = video.comment_count;
-                        const views = video.view_count;
-                        console.log("Likes:", likes !== undefined && likes !== null ? likes : "N/A");
-                        console.log("Comments:", comments !== undefined && comments !== null ? comments : "N/A");
-                        console.log("Views:", views !== undefined && views !== null ? views : "N/A");
+                        line("video_id", video.video_id);
+                        line("shortcode", video.shortcode);
+                        line("Likes", video.like_count);
+                        line("Comments", video.comment_count);
+                        line("Views", video.view_count);
+                        line("Shares", video.share_count);
+                        line("Save count", video.save_count);
+                        line("Play count", video.play_count);
+                        if (video.timestamp) console.log("  Timestamp:", new Date(video.timestamp * 1000).toISOString());
+                        line("Caption", video.caption, fmt);
+                        line("Description", video.description, fmt);
+                        if (Array.isArray(video.hashtags) && video.hashtags.length > 0) console.log("  Hashtags:", video.hashtags.join(", "));
+                        if (Array.isArray(video.mentions) && video.mentions.length > 0) console.log("  Mentions:", video.mentions.join(", "));
+                        if (Array.isArray(video.thumbnails) && video.thumbnails.length > 0) console.log("  Thumbnails:", video.thumbnails.length);
+                        line("Duration (s)", video.duration);
+                        if (video.reaction_love_count !== undefined || video.reaction_haha_count !== undefined ||
+                            video.reaction_wow_count !== undefined || video.reaction_sad_count !== undefined ||
+                            video.reaction_angry_count !== undefined) {
+                            console.log("  Reactions - Love:", video.reaction_love_count ?? 0, "Haha:", video.reaction_haha_count ?? 0,
+                                "Wow:", video.reaction_wow_count ?? 0, "Sad:", video.reaction_sad_count ?? 0, "Angry:", video.reaction_angry_count ?? 0);
+                        }
+                        if (video.updated_time !== undefined) console.log("  updated_time:", video.updated_time);
+                        if (video.total_video_views_unique !== undefined) console.log("  total_video_views_unique:", video.total_video_views_unique);
+                        if (video.live_status) console.log("  live_status:", video.live_status);
+                        if (video.content_category) console.log("  content_category:", video.content_category);
                     }
                 } else {
                     results.push({

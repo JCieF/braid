@@ -6515,8 +6515,23 @@ var TikTokScraper = class extends CreatorMetadataScraper {
         metadata.creator_username = usernameMatch[1];
         metadata.creator_profile_deep_link = profileUrl;
       }
+      const currentUrl = page.url();
+      const videoIdMatch = videoUrl.match(/\/video\/(\d+)/);
+      const alreadyOnVideoPage = videoIdMatch && currentUrl.includes(videoIdMatch[1]);
+      if (alreadyOnVideoPage) {
+        this.logger.log("Already on video page, attempting to extract creator data from here first", "debug");
+        const fromVideoPage = await this.tryExtractCreatorFromVideoPage(page, profileUrl);
+        if (fromVideoPage) {
+          this.logger.log("Successfully extracted TikTok creator metadata from video page (skipped profile)", "info");
+          return fromVideoPage;
+        }
+      }
       await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
-      await this.delay(3e3);
+      try {
+        await page.waitForSelector('[data-e2e="user-title"], [data-e2e="user-avatar"]', { timeout: 3e3 });
+      } catch {
+      }
+      await this.delay(500);
       const nameSelectors = [
         '[data-e2e="user-title"]',
         'h1[data-e2e="user-title"]',
@@ -6625,6 +6640,63 @@ var TikTokScraper = class extends CreatorMetadataScraper {
       return null;
     }
   }
+  async tryExtractCreatorFromVideoPage(page, profileUrl) {
+    try {
+      const raw = await page.evaluate(() => {
+        const result = {};
+        const extractFromData = (data) => {
+          if (!data) return;
+          const itemModule = data.ItemModule || data.itemModule;
+          if (!itemModule) return;
+          const video = Object.values(itemModule)[0];
+          if (!video || !video.author) return;
+          const author = video.author;
+          if (author.avatarThumb || author.avatarMedium || author.avatarLarger) {
+            result.avatar = author.avatarLarger || author.avatarMedium || author.avatarThumb;
+          }
+          if (author.verified !== void 0) {
+            result.verified = author.verified;
+          }
+          if (author.nickname) {
+            result.name = author.nickname;
+          }
+          if (author.signature) {
+            result.bio = author.signature;
+          }
+          const stats = video.authorStats || video.authorStatsV2;
+          if (stats && stats.followerCount !== void 0) {
+            result.follower_count = stats.followerCount;
+          }
+        };
+        if (window.__UNIVERSAL_DATA_FOR_REHYDRATION__) {
+          const data = window.__UNIVERSAL_DATA_FOR_REHYDRATION__;
+          const state = data.defaultScope || data;
+          extractFromData(state);
+        }
+        if (!result.avatar && window.SIGI_STATE) {
+          extractFromData(window.SIGI_STATE);
+        }
+        return Object.keys(result).length > 0 ? result : null;
+      });
+      if (!raw) return null;
+      const metadata = {
+        platform: "tiktok",
+        url: profileUrl,
+        extractedAt: Date.now()
+      };
+      if (raw.avatar) metadata.creator_avatar_url = raw.avatar;
+      if (raw.verified !== void 0) metadata.creator_verified = raw.verified;
+      if (raw.name) metadata.creator_name = raw.name;
+      if (raw.follower_count !== void 0) metadata.creator_follower_count = raw.follower_count;
+      if (raw.bio) metadata.creator_bio = raw.bio;
+      if (!metadata.creator_avatar_url && metadata.creator_verified === void 0 && !metadata.creator_name) {
+        return null;
+      }
+      return metadata;
+    } catch {
+      return null;
+    }
+  }
   async extractVideoMetadata(page, videoUrl) {
     try {
       this.logger.log("Extracting TikTok video metadata...", "info");
@@ -6652,28 +6724,21 @@ var TikTokScraper = class extends CreatorMetadataScraper {
       };
       page.on("response", responseHandler);
       try {
-        await page.goto(videoUrl, { waitUntil: "networkidle" });
+        await page.goto(videoUrl, { waitUntil: "domcontentloaded" });
         await Promise.race([
           page.waitForResponse((response) => {
             const url = response.url();
             return (url.includes("/api/") || url.includes("/aweme/") || url.includes("/tiktok/")) && (url.includes("item") || url.includes("video") || url.includes("post") || url.includes("feed") || url.includes("aweme/v"));
-          }, { timeout: 15e3 }).catch(() => null),
-          new Promise((resolve) => setTimeout(resolve, 15e3))
+          }, { timeout: 8e3 }).catch(() => null),
+          new Promise((resolve) => setTimeout(resolve, 8e3))
         ]);
-        await this.delay(5e3);
+        await this.delay(1e3);
         try {
-          await page.waitForSelector('[data-e2e="browse-video-desc"], [data-e2e="video-desc"], [class*="desc"], h1, [class*="Description"]', { timeout: 5e3 });
+          await page.waitForSelector('[data-e2e="browse-video-desc"], [data-e2e="video-desc"], [class*="desc"], h1, [class*="Description"]', { timeout: 3e3 });
         } catch (e) {
           this.logger.log("Video description element not found, continuing anyway", "debug");
         }
-        await page.evaluate(() => {
-          window.scrollTo(0, document.body.scrollHeight / 2);
-        });
-        await this.delay(2e3);
-        await page.evaluate(() => {
-          window.scrollTo(0, 0);
-        });
-        await this.delay(1e3);
+        await this.delay(200);
       } finally {
         page.off("response", responseHandler);
       }
@@ -6729,25 +6794,29 @@ var TikTokScraper = class extends CreatorMetadataScraper {
       if (!metadata.embed_link && videoIdMatch?.[1]) {
         metadata.embed_link = `https://www.tiktok.com/embed/v2/${videoIdMatch[1]}`;
       }
-      const domData = await this.extractTikTokDOMData(page);
-      if (domData) {
-        this.logger.log(`Extracted ${Object.keys(domData).length} fields from DOM`, "debug");
-        this.logger.log(`DOM data keys: ${Object.keys(domData).join(", ")}`, "debug");
-        if (domData.embed_link && !metadata.embed_link) metadata.embed_link = domData.embed_link;
-        if (domData.hashtags && !metadata.hashtags) {
-          metadata.hashtags = domData.hashtags;
-          this.logger.log(`Found ${domData.hashtags.length} hashtags in DOM`, "info");
-        }
-        if (domData.music_id && !metadata.music_id) {
-          metadata.music_id = domData.music_id;
-          this.logger.log(`Found music_id in DOM: ${domData.music_id}`, "info");
-        }
-        if (domData.caption && !metadata.caption) {
-          metadata.caption = domData.caption;
-          this.logger.log(`Found caption in DOM (${domData.caption.length} chars)`, "info");
+      if (!metadata.hashtags || !metadata.music_id || !metadata.caption) {
+        const domData = await this.extractTikTokDOMData(page);
+        if (domData) {
+          this.logger.log(`Extracted ${Object.keys(domData).length} fields from DOM`, "debug");
+          this.logger.log(`DOM data keys: ${Object.keys(domData).join(", ")}`, "debug");
+          if (domData.embed_link && !metadata.embed_link) metadata.embed_link = domData.embed_link;
+          if (domData.hashtags && !metadata.hashtags) {
+            metadata.hashtags = domData.hashtags;
+            this.logger.log(`Found ${domData.hashtags.length} hashtags in DOM`, "info");
+          }
+          if (domData.music_id && !metadata.music_id) {
+            metadata.music_id = domData.music_id;
+            this.logger.log(`Found music_id in DOM: ${domData.music_id}`, "info");
+          }
+          if (domData.caption && !metadata.caption) {
+            metadata.caption = domData.caption;
+            this.logger.log(`Found caption in DOM (${domData.caption.length} chars)`, "info");
+          }
+        } else {
+          this.logger.log("No data extracted from DOM", "debug");
         }
       } else {
-        this.logger.log("No data extracted from DOM", "debug");
+        this.logger.log("Skipping DOM extraction - all critical fields found in embedded data", "debug");
       }
       this.logger.log(`Final metadata keys: ${Object.keys(metadata).join(", ")}`, "debug");
       if (metadata.effect_ids) {

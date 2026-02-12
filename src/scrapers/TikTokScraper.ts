@@ -37,9 +37,27 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 metadata.creator_username = usernameMatch[1];
                 metadata.creator_profile_deep_link = profileUrl;
             }
-            
+
+            const currentUrl = page.url();
+            const videoIdMatch = videoUrl.match(/\/video\/(\d+)/);
+            const alreadyOnVideoPage = videoIdMatch && currentUrl.includes(videoIdMatch[1]);
+
+            if (alreadyOnVideoPage) {
+                this.logger.log("Already on video page, attempting to extract creator data from here first", "debug");
+                const fromVideoPage = await this.tryExtractCreatorFromVideoPage(page, profileUrl);
+                if (fromVideoPage) {
+                    this.logger.log("Successfully extracted TikTok creator metadata from video page (skipped profile)", "info");
+                    return fromVideoPage;
+                }
+            }
+
             await page.goto(profileUrl, { waitUntil: "domcontentloaded" });
-            await this.delay(3000);
+            try {
+                await page.waitForSelector('[data-e2e="user-title"], [data-e2e="user-avatar"]', { timeout: 3000 });
+            } catch {
+                // Continue if selector not found
+            }
+            await this.delay(500);
 
             const nameSelectors = [
                 '[data-e2e="user-title"]',
@@ -96,13 +114,13 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 const avatar = await this.getElementAttribute(page, selector, "src");
                 if (avatar) {
                     metadata.creator_avatar_url = avatar;
-                    
+
                     if (avatar.includes("tiktokcdn.com")) {
                         const avatar100 = avatar.replace(/~tplv-[^:]+:[^:]+:[^:]+/, "~tplv-tiktokx-cropcenter:100:100");
                         if (avatar100 !== avatar) {
                             metadata.creator_avatar_url_100 = avatar100;
                         }
-                        
+
                         const avatarLarge = avatar.replace(/~tplv-[^:]+:[^:]+:[^:]+/, "~tplv-tiktokx-cropcenter:720:720");
                         if (avatarLarge !== avatar) {
                             metadata.creator_avatar_large_url = avatarLarge;
@@ -131,7 +149,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     break;
                 }
             }
-            
+
             if (!metadata.creator_verified) {
                 try {
                     const verifiedInPage = await page.evaluate(() => {
@@ -140,7 +158,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             const ariaLabel = el.getAttribute('aria-label');
                             const title = el.getAttribute('title');
                             const className = el.className || '';
-                            if ((ariaLabel && ariaLabel.toLowerCase().includes('verified')) || 
+                            if ((ariaLabel && ariaLabel.toLowerCase().includes('verified')) ||
                                 (title && title.toLowerCase().includes('verified')) ||
                                 (className && className.toLowerCase().includes('verified'))) {
                                 return true;
@@ -166,27 +184,96 @@ export class TikTokScraper extends CreatorMetadataScraper {
         }
     }
 
+    private async tryExtractCreatorFromVideoPage(page: Page, profileUrl: string): Promise<CreatorMetadata | null> {
+        try {
+            const raw = await page.evaluate(() => {
+                const result: { avatar?: string; verified?: boolean; name?: string; follower_count?: number; bio?: string } = {};
+
+                const extractFromData = (data: any) => {
+                    if (!data) return;
+                    const itemModule = data.ItemModule || data.itemModule;
+                    if (!itemModule) return;
+
+                    const video = Object.values(itemModule)[0] as any;
+                    if (!video || !video.author) return;
+
+                    const author = video.author;
+                    if (author.avatarThumb || author.avatarMedium || author.avatarLarger) {
+                        result.avatar = author.avatarLarger || author.avatarMedium || author.avatarThumb;
+                    }
+                    if (author.verified !== undefined) {
+                        result.verified = author.verified;
+                    }
+                    if (author.nickname) {
+                        result.name = author.nickname;
+                    }
+                    if (author.signature) {
+                        result.bio = author.signature;
+                    }
+                    const stats = video.authorStats || video.authorStatsV2;
+                    if (stats && stats.followerCount !== undefined) {
+                        result.follower_count = stats.followerCount;
+                    }
+                };
+
+                if ((window as any).__UNIVERSAL_DATA_FOR_REHYDRATION__) {
+                    const data = (window as any).__UNIVERSAL_DATA_FOR_REHYDRATION__;
+                    const state = data.defaultScope || data;
+                    extractFromData(state);
+                }
+
+                if (!result.avatar && (window as any).SIGI_STATE) {
+                    extractFromData((window as any).SIGI_STATE);
+                }
+
+                return Object.keys(result).length > 0 ? result : null;
+            });
+
+            if (!raw) return null;
+
+            const metadata: CreatorMetadata = {
+                platform: "tiktok",
+                url: profileUrl,
+                extractedAt: Date.now(),
+            };
+
+            if (raw.avatar) metadata.creator_avatar_url = raw.avatar;
+            if (raw.verified !== undefined) metadata.creator_verified = raw.verified;
+            if (raw.name) metadata.creator_name = raw.name;
+            if (raw.follower_count !== undefined) metadata.creator_follower_count = raw.follower_count;
+            if (raw.bio) metadata.creator_bio = raw.bio;
+
+            if (!metadata.creator_avatar_url && metadata.creator_verified === undefined && !metadata.creator_name) {
+                return null;
+            }
+
+            return metadata;
+        } catch {
+            return null;
+        }
+    }
+
     async extractVideoMetadata(page: Page, videoUrl: string): Promise<VideoMetadata | null> {
         try {
             this.logger.log("Extracting TikTok video metadata...", "info");
 
             const apiResponses: any[] = [];
             const allApiResponses: any[] = [];
-            
+
             const responseHandler = async (response: any) => {
                 const url = response.url();
-                
+
                 if (url.includes("/api/") || url.includes("/aweme/") || url.includes("/post/") || url.includes("/tiktok/")) {
                     try {
                         const json = await response.json();
                         allApiResponses.push({ url, data: json });
-                        
-                        const hasVideoData = url.includes("item_list") || 
+
+                        const hasVideoData = url.includes("item_list") ||
                             url.includes("itemList") ||
                             url.includes("/post/item_list") ||
                             url.includes("/api/post/item_list") ||
                             url.includes("related/item_list") ||
-                            url.includes("video") || 
+                            url.includes("video") ||
                             url.includes("post") ||
                             url.includes("item/detail") ||
                             url.includes("aweme/detail") ||
@@ -196,14 +283,14 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             url.includes("aweme/v2") ||
                             url.includes("item") ||
                             (json.itemInfo || json.itemList || json.items || json.aweme_detail || json.item || json.data);
-                        
+
                         if (hasVideoData) {
                             apiResponses.push({ url, data: json });
                             this.logger.log(`Found potential video data API: ${url.substring(0, 150)}`, "debug");
-                            
+
                             const dataKeys = Object.keys(json).slice(0, 10);
                             this.logger.log(`  API response keys: ${dataKeys.join(", ")}`, "debug");
-                            
+
                             if (json.itemInfo || json.itemList || json.items || json.aweme_detail || json.item) {
                                 this.logger.log(`  Contains video data structure!`, "info");
                             }
@@ -217,38 +304,30 @@ export class TikTokScraper extends CreatorMetadataScraper {
             page.on("response", responseHandler);
 
             try {
-                await page.goto(videoUrl, { waitUntil: "networkidle" });
-                
+                await page.goto(videoUrl, { waitUntil: "domcontentloaded" });
+
                 await Promise.race([
                     page.waitForResponse((response: any) => {
                         const url = response.url();
-                        return (url.includes("/api/") || url.includes("/aweme/") || url.includes("/tiktok/")) && 
-                               (url.includes("item") || url.includes("video") || url.includes("post") || url.includes("feed") || url.includes("aweme/v"));
-                    }, { timeout: 15000 }).catch(() => null),
-                    new Promise(resolve => setTimeout(resolve, 15000))
+                        return (url.includes("/api/") || url.includes("/aweme/") || url.includes("/tiktok/")) &&
+                            (url.includes("item") || url.includes("video") || url.includes("post") || url.includes("feed") || url.includes("aweme/v"));
+                    }, { timeout: 8000 }).catch(() => null),
+                    new Promise(resolve => setTimeout(resolve, 8000))
                 ]);
-                
-                await this.delay(5000);
-                
+
+                await this.delay(1000);
+
                 try {
-                    await page.waitForSelector('[data-e2e="browse-video-desc"], [data-e2e="video-desc"], [class*="desc"], h1, [class*="Description"]', { timeout: 5000 });
+                    await page.waitForSelector('[data-e2e="browse-video-desc"], [data-e2e="video-desc"], [class*="desc"], h1, [class*="Description"]', { timeout: 3000 });
                 } catch (e) {
                     this.logger.log("Video description element not found, continuing anyway", "debug");
                 }
-                
-                await page.evaluate(() => {
-                    window.scrollTo(0, document.body.scrollHeight / 2);
-                });
-                await this.delay(2000);
-                
-                await page.evaluate(() => {
-                    window.scrollTo(0, 0);
-                });
-                await this.delay(1000);
+
+                await this.delay(200);
             } finally {
                 page.off("response", responseHandler);
             }
-            
+
             this.logger.log(`Total API responses captured: ${allApiResponses.length}`, "debug");
 
             const metadata: VideoMetadata = {
@@ -267,7 +346,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
             if (embeddedData) {
                 this.logger.log(`Extracted ${Object.keys(embeddedData).length} fields from embedded data`, "debug");
                 this.logger.log(`Embedded data keys: ${Object.keys(embeddedData).join(", ")}`, "debug");
-                
+
                 if (embeddedData.embed_link) metadata.embed_link = embeddedData.embed_link;
                 if (embeddedData.hashtags) {
                     metadata.hashtags = embeddedData.hashtags;
@@ -281,7 +360,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                 if (embeddedData.voice_to_text) metadata.voice_to_text = embeddedData.voice_to_text;
                 if (embeddedData.region_code) metadata.region_code = embeddedData.region_code;
                 if (embeddedData.music_id) metadata.music_id = embeddedData.music_id;
-                
+
                 if (embeddedData.caption) metadata.caption = embeddedData.caption;
                 if (embeddedData.timestamp !== undefined) metadata.timestamp = embeddedData.timestamp;
                 if (embeddedData.like_count !== undefined) metadata.like_count = embeddedData.like_count;
@@ -303,32 +382,36 @@ export class TikTokScraper extends CreatorMetadataScraper {
             } else {
                 this.logger.log("No embedded data found", "debug");
             }
-            
+
             if (!metadata.embed_link && videoIdMatch?.[1]) {
                 metadata.embed_link = `https://www.tiktok.com/embed/v2/${videoIdMatch[1]}`;
             }
 
-            const domData = await this.extractTikTokDOMData(page);
-            if (domData) {
-                this.logger.log(`Extracted ${Object.keys(domData).length} fields from DOM`, "debug");
-                this.logger.log(`DOM data keys: ${Object.keys(domData).join(", ")}`, "debug");
-                if (domData.embed_link && !metadata.embed_link) metadata.embed_link = domData.embed_link;
-                if (domData.hashtags && !metadata.hashtags) {
-                    metadata.hashtags = domData.hashtags;
-                    this.logger.log(`Found ${domData.hashtags.length} hashtags in DOM`, "info");
-                }
-                if (domData.music_id && !metadata.music_id) {
-                    metadata.music_id = domData.music_id;
-                    this.logger.log(`Found music_id in DOM: ${domData.music_id}`, "info");
-                }
-                if (domData.caption && !metadata.caption) {
-                    metadata.caption = domData.caption;
-                    this.logger.log(`Found caption in DOM (${domData.caption.length} chars)`, "info");
+            if (!metadata.hashtags || !metadata.music_id || !metadata.caption) {
+                const domData = await this.extractTikTokDOMData(page);
+                if (domData) {
+                    this.logger.log(`Extracted ${Object.keys(domData).length} fields from DOM`, "debug");
+                    this.logger.log(`DOM data keys: ${Object.keys(domData).join(", ")}`, "debug");
+                    if (domData.embed_link && !metadata.embed_link) metadata.embed_link = domData.embed_link;
+                    if (domData.hashtags && !metadata.hashtags) {
+                        metadata.hashtags = domData.hashtags;
+                        this.logger.log(`Found ${domData.hashtags.length} hashtags in DOM`, "info");
+                    }
+                    if (domData.music_id && !metadata.music_id) {
+                        metadata.music_id = domData.music_id;
+                        this.logger.log(`Found music_id in DOM: ${domData.music_id}`, "info");
+                    }
+                    if (domData.caption && !metadata.caption) {
+                        metadata.caption = domData.caption;
+                        this.logger.log(`Found caption in DOM (${domData.caption.length} chars)`, "info");
+                    }
+                } else {
+                    this.logger.log("No data extracted from DOM", "debug");
                 }
             } else {
-                this.logger.log("No data extracted from DOM", "debug");
+                this.logger.log("Skipping DOM extraction - all critical fields found in embedded data", "debug");
             }
-            
+
             this.logger.log(`Final metadata keys: ${Object.keys(metadata).join(", ")}`, "debug");
             if (metadata.effect_ids) {
                 this.logger.log(`Final effect_ids: ${Array.isArray(metadata.effect_ids) ? metadata.effect_ids.join(", ") : metadata.effect_ids}`, "info");
@@ -336,7 +419,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
             if (metadata.hashtags) {
                 this.logger.log(`Final hashtags: ${Array.isArray(metadata.hashtags) ? metadata.hashtags.join(", ") : metadata.hashtags}`, "info");
             }
-            
+
             const creatorFields: any = {};
             if ((embeddedData as any)?.creator_open_id) creatorFields.creator_open_id = (embeddedData as any).creator_open_id;
             if ((embeddedData as any)?.creator_union_id) creatorFields.creator_union_id = (embeddedData as any).creator_union_id;
@@ -346,7 +429,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
             if ((embeddedData as any)?.creator_following_count !== undefined) creatorFields.creator_following_count = (embeddedData as any).creator_following_count;
             if ((embeddedData as any)?.creator_likes_count !== undefined) creatorFields.creator_likes_count = (embeddedData as any).creator_likes_count;
             if ((embeddedData as any)?.creator_video_count !== undefined) creatorFields.creator_video_count = (embeddedData as any).creator_video_count;
-            
+
             if (Object.keys(creatorFields).length > 0) {
                 (metadata as any).creator_fields = creatorFields;
                 this.logger.log(`Extracted ${Object.keys(creatorFields).length} creator fields from video API`, "info");
@@ -726,7 +809,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
             `;
 
             let response = await page.evaluate(evalCode + `(${JSON.stringify(videoId)})`) as { data: Partial<VideoMetadata> | null; debug?: any } | null;
-            
+
             if (!response) {
                 response = { data: {} };
             } else if (!response.data) {
@@ -739,21 +822,21 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     this.logger.log(`Processing API URL: ${apiResp.url.substring(0, 150)}`, "debug");
                     const dataKeys = apiResp.data ? Object.keys(apiResp.data).slice(0, 15) : [];
                     this.logger.log(`API data keys: ${dataKeys.join(", ")}`, "debug");
-                    
+
                     const extractVideoData = (videoData: any, source: string) => {
                         if (!videoData || !response?.data) return;
-                        
+
                         const videoKeys = Object.keys(videoData);
                         this.logger.log(`${source} video keys (first 50): ${videoKeys.slice(0, 50).join(", ")}`, "debug");
                         if (videoKeys.length > 50) {
                             this.logger.log(`${source} video has ${videoKeys.length} total keys (showing first 50)`, "debug");
                         }
-                        
+
                         const hasEffectStickers = videoKeys.includes('effectStickers');
                         if (hasEffectStickers) {
                             this.logger.log(`${source} has effectStickers key`, "debug");
                         }
-                        
+
                         if (videoData.effectStickers) {
                             this.logger.log(`${source} effectStickers type: ${Array.isArray(videoData.effectStickers) ? 'array' : typeof videoData.effectStickers}, length: ${Array.isArray(videoData.effectStickers) ? videoData.effectStickers.length : 'N/A'}`, "debug");
                             if (Array.isArray(videoData.effectStickers) && videoData.effectStickers.length > 0) {
@@ -762,24 +845,24 @@ export class TikTokScraper extends CreatorMetadataScraper {
                         } else {
                             this.logger.log(`${source} no effectStickers found (checked ${videoKeys.length} keys)`, "debug");
                         }
-                        
+
                         if (videoData.desc) {
                             this.logger.log(`${source} desc preview: ${String(videoData.desc).substring(0, 100)}`, "debug");
                         }
-                        
+
                         if (videoData.textExtra) {
                             this.logger.log(`${source} textExtra type: ${Array.isArray(videoData.textExtra) ? 'array' : typeof videoData.textExtra}, length: ${Array.isArray(videoData.textExtra) ? videoData.textExtra.length : 'N/A'}`, "debug");
                         }
-                        
+
                         if (videoData.challengeList) {
                             this.logger.log(`${source} challengeList type: ${Array.isArray(videoData.challengeList) ? 'array' : typeof videoData.challengeList}, length: ${Array.isArray(videoData.challengeList) ? videoData.challengeList.length : 'N/A'}`, "debug");
                         }
-                        
+
                         if (!response.data.caption && videoData.desc) {
                             response.data.caption = String(videoData.desc);
                             this.logger.log(`Extracted caption from ${source} (${response.data.caption.length} chars)`, "info");
                         }
-                        
+
                         if (!response.data.timestamp && videoData.createTime) {
                             const createTime = typeof videoData.createTime === 'number' ? videoData.createTime : parseInt(String(videoData.createTime));
                             if (!isNaN(createTime)) {
@@ -787,56 +870,56 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted timestamp from ${source}: ${createTime}`, "info");
                             }
                         }
-                        
+
                         if (videoData.stats) {
                             if (!response.data.like_count && (videoData.stats.diggCount !== undefined || videoData.stats.likeCount !== undefined)) {
                                 response.data.like_count = videoData.stats.diggCount || videoData.stats.likeCount || 0;
                                 this.logger.log(`Extracted like_count from ${source}: ${response.data.like_count}`, "info");
                             }
-                            
+
                             if (!response.data.comment_count && videoData.stats.commentCount !== undefined) {
                                 response.data.comment_count = videoData.stats.commentCount || 0;
                                 this.logger.log(`Extracted comment_count from ${source}: ${response.data.comment_count}`, "info");
                             }
-                            
+
                             if (!response.data.view_count && (videoData.stats.playCount !== undefined || videoData.stats.viewCount !== undefined)) {
                                 response.data.view_count = videoData.stats.playCount || videoData.stats.viewCount || 0;
                                 this.logger.log(`Extracted view_count from ${source}: ${response.data.view_count}`, "info");
                             }
-                            
+
                             if (!response.data.play_count && videoData.stats.playCount !== undefined) {
                                 response.data.play_count = videoData.stats.playCount || 0;
                                 this.logger.log(`Extracted play_count from ${source}: ${response.data.play_count}`, "info");
                             }
-                            
+
                             if (!response.data.share_count && videoData.stats.shareCount !== undefined) {
                                 response.data.share_count = videoData.stats.shareCount || 0;
                                 this.logger.log(`Extracted share_count from ${source}: ${response.data.share_count}`, "info");
                             }
                         }
-                        
+
                         if (videoData.statsV2) {
                             if (!response.data.like_count && (videoData.statsV2.diggCount !== undefined || videoData.statsV2.likeCount !== undefined)) {
                                 response.data.like_count = videoData.statsV2.diggCount || videoData.statsV2.likeCount || 0;
                                 this.logger.log(`Extracted like_count from ${source} statsV2: ${response.data.like_count}`, "info");
                             }
-                            
+
                             if (!response.data.comment_count && videoData.statsV2.commentCount !== undefined) {
                                 response.data.comment_count = videoData.statsV2.commentCount || 0;
                                 this.logger.log(`Extracted comment_count from ${source} statsV2: ${response.data.comment_count}`, "info");
                             }
-                            
+
                             if (!response.data.view_count && (videoData.statsV2.playCount !== undefined || videoData.statsV2.viewCount !== undefined)) {
                                 response.data.view_count = videoData.statsV2.playCount || videoData.statsV2.viewCount || 0;
                                 this.logger.log(`Extracted view_count from ${source} statsV2: ${response.data.view_count}`, "info");
                             }
-                            
+
                             if (!response.data.share_count && videoData.statsV2.shareCount !== undefined) {
                                 response.data.share_count = videoData.statsV2.shareCount || 0;
                                 this.logger.log(`Extracted share_count from ${source} statsV2: ${response.data.share_count}`, "info");
                             }
                         }
-                        
+
                         if (!response.data.duration && videoData.video?.duration) {
                             const duration = typeof videoData.video.duration === 'number' ? videoData.video.duration : parseInt(String(videoData.video.duration));
                             if (!isNaN(duration) && duration > 0) {
@@ -844,22 +927,22 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted duration from ${source}: ${duration}s`, "info");
                             }
                         }
-                        
+
                         if (!response.data.music_title && videoData.music?.title) {
                             response.data.music_title = String(videoData.music.title);
                             this.logger.log(`Extracted music_title from ${source}: ${response.data.music_title}`, "info");
                         }
-                        
+
                         if (!response.data.music_artist && videoData.music?.authorName) {
                             response.data.music_artist = String(videoData.music.authorName);
                             this.logger.log(`Extracted music_artist from ${source}: ${response.data.music_artist}`, "info");
                         }
-                        
+
                         if (!response.data.music_artist && videoData.music?.author) {
                             response.data.music_artist = String(videoData.music.author);
                             this.logger.log(`Extracted music_artist from ${source} (author): ${response.data.music_artist}`, "info");
                         }
-                        
+
                         if (!response.data.hashtags && videoData.desc) {
                             const descText = String(videoData.desc);
                             const hashtags = (descText.match(/#[\w\u4e00-\u9fff]+/g) || []).map((h: string) => h.substring(1));
@@ -875,7 +958,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 }
                             }
                         }
-                        
+
                         if (!response.data.hashtags && videoData.textExtra && Array.isArray(videoData.textExtra)) {
                             const hashtags = videoData.textExtra
                                 .filter((item: any) => item.hashtagName || item.hashtag)
@@ -886,7 +969,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted hashtags from ${source} textExtra: ${hashtags.join(", ")}`, "info");
                             }
                         }
-                        
+
                         if (!response.data.hashtags && videoData.challengeList && Array.isArray(videoData.challengeList)) {
                             const hashtags = videoData.challengeList
                                 .map((c: any) => c.title || c.challengeName || c.name)
@@ -896,7 +979,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted hashtags from ${source} challengeList: ${hashtags.join(", ")}`, "info");
                             }
                         }
-                        
+
                         if (!response.data.music_id && videoData.music) {
                             const musicId = videoData.music.id || videoData.music.musicId || videoData.musicId || videoData.music?.idStr;
                             if (musicId) {
@@ -904,7 +987,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted music_id from ${source}: ${musicId}`, "info");
                             }
                         }
-                        
+
                         if (!response.data.effect_ids && videoData.effectStickers) {
                             this.logger.log(`${source} has effectStickers, type: ${typeof videoData.effectStickers}, isArray: ${Array.isArray(videoData.effectStickers)}`, "debug");
                             let effects: string[] = [];
@@ -932,12 +1015,12 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`${source} effectStickers exists but no IDs extracted`, "debug");
                             }
                         }
-                        
+
                         if (!response.data.effect_ids && videoData.effectIds && Array.isArray(videoData.effectIds)) {
                             response.data.effect_ids = videoData.effectIds.map(String);
                             this.logger.log(`Extracted effect_ids from ${source} effectIds: ${response.data.effect_ids?.join(", ")}`, "info");
                         }
-                        
+
                         if (!response.data.effect_ids && videoData.stickersOnItem && Array.isArray(videoData.stickersOnItem)) {
                             const effects = videoData.stickersOnItem
                                 .map((s: any) => s.stickerId || s.id || s.effectId)
@@ -948,47 +1031,47 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted effect_ids from ${source} stickersOnItem: ${effects.join(", ")}`, "info");
                             }
                         }
-                        
+
                         if (!response.data.playlist_id && videoData.playlistId) {
                             response.data.playlist_id = String(videoData.playlistId);
                             this.logger.log(`Extracted playlist_id from ${source}: ${response.data.playlist_id}`, "info");
                         }
-                        
+
                         if (!response.data.playlist_id && videoData.playlist_id) {
                             response.data.playlist_id = String(videoData.playlist_id);
                             this.logger.log(`Extracted playlist_id from ${source} (playlist_id): ${response.data.playlist_id}`, "info");
                         }
-                        
+
                         if (!response.data.playlist_id && videoData.music?.playlistId) {
                             response.data.playlist_id = String(videoData.music.playlistId);
                             this.logger.log(`Extracted playlist_id from ${source} (music.playlistId): ${response.data.playlist_id}`, "info");
                         }
-                        
+
                         if (!response.data.region_code && videoData.regionCode) {
                             response.data.region_code = videoData.regionCode;
                             this.logger.log(`Extracted region_code from ${source}: ${response.data.region_code}`, "info");
                         }
-                        
+
                         if (!response.data.region_code && videoData.region) {
                             response.data.region_code = videoData.region;
                             this.logger.log(`Extracted region_code from ${source} (region): ${response.data.region_code}`, "info");
                         }
-                        
+
                         if (!response.data.region_code && videoData.video?.region) {
                             response.data.region_code = videoData.video.region;
                             this.logger.log(`Extracted region_code from ${source} (video.region): ${response.data.region_code}`, "info");
                         }
-                        
+
                         if (!response.data.voice_to_text && videoData.transcription) {
                             response.data.voice_to_text = videoData.transcription;
                             this.logger.log(`Extracted voice_to_text from ${source} (${videoData.transcription.length} chars)`, "info");
                         }
-                        
+
                         if (!response.data.voice_to_text && videoData.voiceToText) {
                             response.data.voice_to_text = videoData.voiceToText;
                             this.logger.log(`Extracted voice_to_text from ${source} (${videoData.voiceToText.length} chars)`, "info");
                         }
-                        
+
                         if (!response.data.voice_to_text && videoData.subtitleInfos && Array.isArray(videoData.subtitleInfos)) {
                             const subtitles = videoData.subtitleInfos
                                 .map((s: any) => s.content || s.text || s.subtitle)
@@ -999,7 +1082,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted voice_to_text from ${source} subtitleInfos (${subtitles.length} chars)`, "info");
                             }
                         }
-                        
+
                         if (videoData.textExtra && Array.isArray(videoData.textExtra)) {
                             const mentions = videoData.textExtra
                                 .filter((item: any) => item.userUniqueId || item.userId || item.userUniqueId || item.type === 'user')
@@ -1010,13 +1093,13 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 this.logger.log(`Extracted mentions from ${source}: ${mentions.join(", ")}`, "info");
                             }
                         }
-                        
+
                         if (videoData.video) {
                             if (!response.data.is_video && videoData.video.duration !== undefined) {
                                 response.data.is_video = true;
                                 this.logger.log(`Extracted is_video from ${source}: true`, "info");
                             }
-                            
+
                             const thumbnails: string[] = [];
                             if (videoData.video.cover) thumbnails.push(String(videoData.video.cover));
                             if (videoData.video.dynamicCover) thumbnails.push(String(videoData.video.dynamicCover));
@@ -1025,7 +1108,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 response.data.thumbnails = thumbnails;
                                 this.logger.log(`Extracted ${thumbnails.length} thumbnail(s) from ${source}`, "info");
                             }
-                            
+
                             if (videoData.video.width && !response.data.dimension) {
                                 const width = typeof videoData.video.width === 'number' ? videoData.video.width : parseInt(String(videoData.video.width));
                                 const height = videoData.video.height ? (typeof videoData.video.height === 'number' ? videoData.video.height : parseInt(String(videoData.video.height))) : null;
@@ -1035,48 +1118,48 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 }
                             }
                         }
-                        
+
                         if (!response.data.caption && videoData.title) {
                             response.data.caption = String(videoData.title);
                             this.logger.log(`Extracted title as caption from ${source}`, "info");
                         }
-                        
+
                         if (videoData.collected !== undefined && !response.data.save_count) {
                             response.data.save_count = videoData.collected ? 1 : 0;
                             this.logger.log(`Extracted save_count (collected) from ${source}: ${response.data.save_count}`, "info");
                         }
-                        
+
                         if (videoData.author) {
                             if (videoData.author.openId && !(response.data as any).creator_open_id) {
                                 (response.data as any).creator_open_id = String(videoData.author.openId);
                                 this.logger.log(`Extracted creator_open_id from ${source}: ${(response.data as any).creator_open_id}`, "info");
                             }
-                            
+
                             if (videoData.author.unionId && !(response.data as any).creator_union_id) {
                                 (response.data as any).creator_union_id = String(videoData.author.unionId);
                                 this.logger.log(`Extracted creator_union_id from ${source}: ${(response.data as any).creator_union_id}`, "info");
                             }
-                            
+
                             if (videoData.author.avatarThumb && !(response.data as any).creator_avatar_url_100) {
                                 (response.data as any).creator_avatar_url_100 = String(videoData.author.avatarThumb);
                                 this.logger.log(`Extracted creator_avatar_url_100 from ${source}`, "info");
                             }
-                            
+
                             if (videoData.author.avatarMedium && !(response.data as any).creator_avatar_large_url) {
                                 (response.data as any).creator_avatar_large_url = String(videoData.author.avatarMedium);
                                 this.logger.log(`Extracted creator_avatar_large_url from ${source}`, "info");
                             }
-                            
+
                             if (videoData.author.avatarLarger && !(response.data as any).creator_avatar_large_url) {
                                 (response.data as any).creator_avatar_large_url = String(videoData.author.avatarLarger);
                                 this.logger.log(`Extracted creator_avatar_large_url from ${source} (avatarLarger)`, "info");
                             }
-                            
+
                             if (videoData.author.uniqueId && !(response.data as any).creator_profile_deep_link) {
                                 (response.data as any).creator_profile_deep_link = `https://www.tiktok.com/@${videoData.author.uniqueId}`;
                                 this.logger.log(`Extracted creator_profile_deep_link from ${source}: ${(response.data as any).creator_profile_deep_link}`, "info");
                             }
-                            
+
                             if (videoData.authorStats) {
                                 if (videoData.authorStats.followingCount !== undefined && !(response.data as any).creator_following_count) {
                                     (response.data as any).creator_following_count = videoData.authorStats.followingCount;
@@ -1091,7 +1174,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                     this.logger.log(`Extracted creator_video_count from ${source}: ${(response.data as any).creator_video_count}`, "info");
                                 }
                             }
-                            
+
                             if (videoData.authorStatsV2) {
                                 if (videoData.authorStatsV2.followingCount !== undefined && !(response.data as any).creator_following_count) {
                                     (response.data as any).creator_following_count = videoData.authorStatsV2.followingCount;
@@ -1107,7 +1190,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                                 }
                             }
                         }
-                        
+
                         if (videoData.locationInfo || videoData.location) {
                             const location = videoData.locationInfo || videoData.location;
                             if (location && !response.data.location) {
@@ -1124,17 +1207,17 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             }
                         }
                     };
-                    
+
                     if (apiResp.data?.itemList) {
                         const items = apiResp.data.itemList;
                         if (Array.isArray(items) && items.length > 0) {
-                            const video = items.find((item: any) => 
-                                item.itemInfo?.itemId === videoId || 
+                            const video = items.find((item: any) =>
+                                item.itemInfo?.itemId === videoId ||
                                 item.itemInfo?.itemStruct?.id === videoId ||
                                 item.id === videoId ||
                                 item.itemInfo?.itemStruct?.video?.id === videoId
                             ) || items[0];
-                            
+
                             if (video?.itemInfo?.itemStruct) {
                                 extractVideoData(video.itemInfo.itemStruct, "itemList.itemInfo.itemStruct");
                             } else if (video?.itemStruct) {
@@ -1144,7 +1227,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             }
                         }
                     }
-                    
+
                     if (apiResp.data?.itemList && Array.isArray(apiResp.data.itemList)) {
                         for (const item of apiResp.data.itemList) {
                             if (item && (item.id === videoId || item.itemInfo?.itemId === videoId)) {
@@ -1158,26 +1241,26 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             }
                         }
                     }
-                    
+
                     if (apiResp.data?.itemInfo?.itemStruct) {
                         extractVideoData(apiResp.data.itemInfo.itemStruct, "itemInfo.itemStruct");
                     }
-                    
+
                     if (apiResp.data?.aweme_detail) {
                         extractVideoData(apiResp.data.aweme_detail, "aweme_detail");
                     }
-                    
+
                     if (apiResp.data?.items && Array.isArray(apiResp.data.items)) {
                         const video = apiResp.data.items.find((item: any) => item.id === videoId) || apiResp.data.items[0];
                         if (video) {
                             extractVideoData(video, "items array");
                         }
                     }
-                    
+
                     if (apiResp.data?.item) {
                         extractVideoData(apiResp.data.item, "item");
                     }
-                    
+
                     if (apiResp.data?.keywordsByItemId && videoId) {
                         const keywords = apiResp.data.keywordsByItemId[videoId];
                         if (keywords && Array.isArray(keywords) && keywords.length > 0 && response?.data && !response.data.hashtags) {
@@ -1187,12 +1270,12 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     }
                 }
             }
-            
+
             const windowData = await page.evaluate((vidId) => {
                 const result: any = {};
                 try {
                     const win = window as any;
-                    
+
                     if (win.__UNIVERSAL_DATA_FOR_REHYDRATION__) {
                         result.hasUniversalData = true;
                         try {
@@ -1219,22 +1302,22 @@ export class TikTokScraper extends CreatorMetadataScraper {
                             result.universalError = String(e);
                         }
                     }
-                    
+
                     if (win.__$UNIVERSAL_DATA$__) {
                         result.hasUniversalDataDollar = true;
                     }
-                    
+
                     if (win.SIGI_STATE) {
                         result.hasSIGI = true;
                     }
-                    
+
                     result.windowKeys = Object.keys(win).filter(k => k.startsWith('__') || k.includes('DATA') || k.includes('STATE')).slice(0, 20);
                 } catch (e) {
                     result.error = String(e);
                 }
                 return result;
             }, videoId || "");
-            
+
             if (windowData.foundVideoInUniversal) {
                 this.logger.log(`Found video in __UNIVERSAL_DATA_FOR_REHYDRATION__`, "debug");
                 if (windowData.videoKeys) {
@@ -1249,7 +1332,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     this.logger.log(`Extracted music_id from window: ${windowData.music_id}`, "debug");
                 }
             }
-            
+
             if (windowData.windowKeys && windowData.windowKeys.length > 0) {
                 this.logger.log(`Window objects found: ${windowData.windowKeys.join(", ")}`, "debug");
             }
@@ -1279,7 +1362,7 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     this.logger.log(`Found hashtags in DOM: ${response.debug.descText}`, "debug");
                 }
             }
-            
+
             if (response?.data) {
                 const extractedKeys = Object.keys(response.data);
                 this.logger.log(`Final extracted data keys: ${extractedKeys.join(", ")}`, "debug");
@@ -1600,11 +1683,11 @@ export class TikTokScraper extends CreatorMetadataScraper {
                     data.debug.forEach((log: string) => this.logger.log(`[DOM Debug] ${log}`, "debug"));
                     delete data.debug;
                 }
-                
+
                 if (Object.keys(data).length === 0) {
                     return null;
                 }
-                
+
                 return data;
             }
 
