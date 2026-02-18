@@ -1,5 +1,11 @@
 import { Page } from "playwright";
-import { CreatorMetadata, VideoMetadata, CreatorMetadataScraperConfig } from "../../types/index.js";
+import {
+    CreatorMetadata,
+    VideoMetadata,
+    CreatorMetadataScraperConfig,
+    RedditScrapeResult,
+    RedditPostData,
+} from "../../types/index.js";
 import { ApiScraperAdapter } from "../ApiScraperAdapter.js";
 import { Logger } from "../../helpers/StringBuilder.js";
 
@@ -96,12 +102,83 @@ export class RedditApiScraper extends ApiScraperAdapter {
             const normalized = this.normalizeApiPayloadToVideoShape(payload as Record<string, unknown>, url);
             logAgent.log(`Normalized video data: ${JSON.stringify(normalized)}`, "debug");
             const metadata = this.mapApiResponseToVideoMetadata(normalized, url, "reddit");
+            const payloadTitle = (payload as Record<string, unknown>).title;
+            const titleStr = typeof payloadTitle === "string" ? payloadTitle : payloadTitle != null ? String(payloadTitle) : "";
+            if (titleStr) {
+                metadata.title = titleStr;
+                if (!metadata.caption) metadata.caption = titleStr;
+            }
+            logAgent.log(`Metadata summary: ${titleStr ? `title="${titleStr.replace(/"/g, '\\"')}"` : "no title"}`, "info");
             logAgent.log("Successfully extracted Reddit video metadata via API", "info");
             logAgent.log(`Metadata: ${JSON.stringify(metadata)}`, "debug");
 
             return metadata;
         } catch (error) {
             logAgent.log(`Failed to extract Reddit video metadata via API: ${error instanceof Error ? error.message : String(error)}`, "error");
+            return null;
+        }
+    }
+
+    /**
+     * Fetch full Reddit scrape result (raw API payload + normalized video metadata).
+     * Use this when you need the complete structure to display all scraped data.
+     */
+    async getRedditPostResult(url: string): Promise<RedditScrapeResult | null> {
+        const logAgent = this.logger;
+        try {
+            logAgent.log(`Fetching Reddit post result for: ${url}`, "info");
+            const apiData = await this.scrapeAndPoll(url);
+            if (!apiData) {
+                logAgent.log("API response missing data", "warn");
+                return null;
+            }
+            const hasNestedData = apiData && apiData.data != null && typeof apiData.data === "object";
+            const payload = hasNestedData ? apiData.data : apiData;
+            const status = hasNestedData ? apiData.scrape_status : (payload as Record<string, unknown>).scrape_status;
+            const resultUrl = (apiData as Record<string, unknown>).url != null
+                ? String((apiData as Record<string, unknown>).url)
+                : url;
+
+            if (!payload || typeof payload !== "object") {
+                logAgent.log("API response has no mappable payload", "warn");
+                return null;
+            }
+            if (status === "Queued" || status === "Processing") {
+                logAgent.log(`Scrape job not completed (status: ${status})`, "warn");
+                return null;
+            }
+
+            const data: RedditPostData = {
+                title: payload.title != null ? String(payload.title) : undefined,
+                content: payload.content != null ? String(payload.content) : undefined,
+                authors: payload.authors,
+                publish_date: payload.publish_date != null ? String(payload.publish_date) : undefined,
+                attachments: payload.attachments as RedditPostData["attachments"],
+                organic_traffic: payload.organic_traffic as RedditPostData["organic_traffic"],
+                engagements: payload.engagements as RedditPostData["engagements"],
+                reach_metrics: payload.reach_metrics as RedditPostData["reach_metrics"],
+                comments: payload.comments as RedditPostData["comments"],
+                virality: payload.virality as RedditPostData["virality"],
+            };
+
+            const normalized = this.normalizeApiPayloadToVideoShape(payload as Record<string, unknown>, url);
+            const videoMetadata = this.mapApiResponseToVideoMetadata(normalized, url, "reddit");
+            if (data.title) {
+                videoMetadata.title = data.title;
+                if (!videoMetadata.caption) videoMetadata.caption = data.title;
+            }
+
+            const result: RedditScrapeResult = {
+                url: resultUrl,
+                _id: (apiData as Record<string, unknown>)._id != null ? String((apiData as Record<string, unknown>)._id) : undefined,
+                scrape_status: status ?? "Done",
+                data,
+                videoMetadata,
+            };
+            logAgent.log("Successfully fetched Reddit post result", "info");
+            return result;
+        } catch (error) {
+            logAgent.log(`Failed to fetch Reddit post result: ${error instanceof Error ? error.message : String(error)}`, "error");
             return null;
         }
     }

@@ -329,3 +329,76 @@ export interface ExtendedMetadata {
     creator?: CreatorMetadata;
     video?: VideoMetadata;
 }
+
+/** Reddit API scraper result types – full structure for displaying all scraped data */
+
+export interface RedditEngagements {
+    views_count?: number;
+    comments_count?: number;
+    shares_count?: number;
+    quotes_count?: number;
+    likes_count?: number;
+    dislikes_count?: number;
+    love_count?: number;
+    haha_count?: number;
+    wow_count?: number;
+    sad_count?: number;
+    angry_count?: number;
+    care_count?: number;
+}
+
+export interface RedditReachMetrics {
+    followers_count?: number;
+    page_likes?: number;
+    subscribers_count?: number;
+}
+
+export interface RedditCommentEngagements {
+    likes_count?: number;
+    dislikes_count?: number;
+    love_count?: number;
+    haha_count?: number;
+    wow_count?: number;
+    sad_count?: number;
+    angry_count?: number;
+    care_count?: number;
+}
+
+export interface RedditComment {
+    _id?: string;
+    comment_url?: string;
+    author?: string;
+    content?: string;
+    date_published?: string;
+    engagements?: RedditCommentEngagements;
+}
+
+export interface RedditAttachments {
+    photos?: string[];
+    embedded_link?: string[];
+    video?: string[];
+    gif?: string[];
+    music?: string[];
+}
+
+export interface RedditPostData {
+    title?: string;
+    content?: string;
+    authors?: string | string[];
+    publish_date?: string;
+    attachments?: RedditAttachments;
+    organic_traffic?: Record<string, unknown> | null;
+    engagements?: RedditEngagements;
+    reach_metrics?: RedditReachMetrics;
+    comments?: RedditComment[];
+    virality?: Record<string, unknown> | null;
+}
+
+/** Full Reddit scrape result: raw API payload + optional normalized video metadata for display */
+export interface RedditScrapeResult {
+    url: string;
+    _id?: string;
+    scrape_status: string;
+    data: RedditPostData;
+    videoMetadata?: VideoMetadata;
+}

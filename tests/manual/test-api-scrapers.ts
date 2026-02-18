@@ -1,6 +1,8 @@
 import { CreatorMetadataManager } from "../../src/scrapers/CreatorMetadataManager";
+import { RedditApiScraper } from "../../src/scrapers/api/RedditApiScraper";
 import { Logger } from "../../src/helpers/StringBuilder";
 import { BrowserType } from "../../src/types/index";
+import type { RedditScrapeResult } from "../../src/types/index";
 
 interface TestResult {
     url: string;
@@ -23,6 +25,56 @@ const mockInvokeEvent = {
         },
     },
 };
+
+function displayRedditResult(result: RedditScrapeResult) {
+    console.log("\n[REDDIT FULL RESULT]");
+    console.log("  url:", result.url);
+    if (result._id) console.log("  _id:", result._id);
+    console.log("  scrape_status:", result.scrape_status);
+    const d = result.data;
+    console.log("\n  [data]");
+    if (d.title != null) console.log("    title:", d.title);
+    if (d.content != null && d.content !== "") console.log("    content:", d.content.slice(0, 200) + (d.content.length > 200 ? "..." : ""));
+    if (d.authors != null) console.log("    authors:", Array.isArray(d.authors) ? d.authors.join(", ") : d.authors);
+    if (d.publish_date != null) console.log("    publish_date:", d.publish_date);
+    if (d.attachments != null) {
+        const a = d.attachments;
+        console.log("    attachments:");
+        if (a.photos?.length) console.log("      photos:", a.photos.length);
+        if (a.embedded_link?.length) console.log("      embedded_link:", a.embedded_link);
+        if (a.video?.length) console.log("      video:", a.video);
+        if (a.gif?.length) console.log("      gif:", a.gif.length);
+        if (a.music?.length) console.log("      music:", a.music.length);
+    }
+    if (d.organic_traffic != null) console.log("    organic_traffic:", JSON.stringify(d.organic_traffic));
+    if (d.engagements != null) {
+        console.log("    engagements:", JSON.stringify(d.engagements));
+    }
+    if (d.reach_metrics != null) {
+        console.log("    reach_metrics:", JSON.stringify(d.reach_metrics));
+    }
+    if (d.comments != null) {
+        console.log("    comments: count =", d.comments.length);
+        d.comments.slice(0, 3).forEach((c, i) => {
+            const contentPreview = (c.content ?? "").slice(0, 60);
+            console.log(`      [${i}] author: ${c.author}, content: ${contentPreview}${(c.content ?? "").length > 60 ? "..." : ""}`);
+        });
+        if (d.comments.length > 3) console.log("      ... and", d.comments.length - 3, "more");
+    }
+    if (d.virality != null) console.log("    virality:", JSON.stringify(d.virality));
+    if (result.videoMetadata) {
+        const v = result.videoMetadata;
+        console.log("\n  [videoMetadata]");
+        console.log("    video_id:", v.video_id);
+        console.log("    title:", v.title);
+        console.log("    caption:", v.caption);
+        console.log("    like_count:", v.like_count);
+        console.log("    comment_count:", v.comment_count);
+        console.log("    view_count:", v.view_count);
+        console.log("    share_count:", v.share_count);
+        console.log("    timestamp:", v.timestamp);
+    }
+}
 
 async function testApiScrapers() {
     console.log("=== API Scrapers Test ===\n");
@@ -48,7 +100,7 @@ async function testApiScrapers() {
             "https://x.com/AKEndfield/status/2019969369565196529",
         ],
         reddit: [
-            "https://www.reddit.com/r/Endfield/comments/1r1vpk5/_/",
+            "https://www.reddit.com/r/ValorantCompetitive/comments/1qybnj9/zynx_hits_superhuman_borderline_impossible/",
         ],
         youtube: [
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -217,6 +269,12 @@ async function testApiScrapers() {
                         if (video.total_video_views_unique !== undefined) console.log("  total_video_views_unique:", video.total_video_views_unique);
                         if (video.live_status) console.log("  live_status:", video.live_status);
                         if (video.content_category) console.log("  content_category:", video.content_category);
+                    }
+
+                    if (platform === "reddit") {
+                        const redditScraper = new RedditApiScraper(logger, config);
+                        const redditResult = await redditScraper.getRedditPostResult(url);
+                        if (redditResult) displayRedditResult(redditResult);
                     }
                 } else {
                     results.push({
